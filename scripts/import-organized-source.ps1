@@ -22,6 +22,16 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
 $repoRoot = (Resolve-Path -LiteralPath $repoRoot).Path
 Set-Location -LiteralPath $repoRoot
 
+$branch = (& git branch --show-current)
+if ($LASTEXITCODE -ne 0 -or $branch -ne 'main') {
+    throw "Switch to the main branch before importing. Current branch: $branch"
+}
+$existingChanges = (& git status --porcelain -- app live-rs)
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing app/ and live-rs/ worktree.' }
+if (-not [string]::IsNullOrWhiteSpace(($existingChanges -join ''))) {
+    throw "app/ or live-rs/ already has local changes. Commit or back them up before importing: $($existingChanges -join [Environment]::NewLine)"
+}
+
 $origin = (& git remote get-url origin 2>$null)
 if ($LASTEXITCODE -ne 0 -or $origin -notmatch 'github\.com[:/]avelatojr-source/Shukanji(?:\.git)?$') {
     throw "The origin remote does not appear to be avelatojr-source/Shukanji. Found: $origin"
