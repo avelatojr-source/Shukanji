@@ -1,93 +1,66 @@
 # ShuKanji
 
-**A native Windows desktop companion for TikTok LIVE streaming.** ShuKanji retrieves TikTok stream credentials through Streamlabs, configures and verifies OBS Studio over OBS WebSocket, can start or stop OBS output with explicit user action, and displays TikTok LIVE chat and audience events in one chronological feed.
+### Your TikTok LIVE chat, finally in one place.
 
-Built with Rust and egui, the project consists of a Windows desktop application and a separate Rust TikTok LIVE client.
+Going LIVE and tired of jumping between windows just to keep up with your chat? **ShuKanji is a Windows desktop companion that helps you follow what is happening on your TikTok LIVE while you manage your stream.**
 
-> [!IMPORTANT]
-> This GitHub repository currently contains the project documentation and import helper. The full Rust source tree and embedded binary assets still need to be imported from the organized source archive. Do not treat the repository as buildable until `app/` and `live-rs/` have been pushed and a Windows build has been checked.
+See messages and audience activity in one live feed, keep an eye on gifts and follows, and handle key OBS setup from the same app. Spend less time hunting for updates and more time actually streaming.
 
-## Import the complete source
+> **Keep your chat in sight. Catch the moments. Stay with your stream.**
 
-The source code and embedded binary assets are not yet in this GitHub tree. Download the `ShuKanji-Organized-Source.zip` archive supplied with the project handoff, clone this repository, and run the checked-in [PowerShell importer](scripts/import-organized-source.ps1). It validates the two sibling Cargo crates and required assets, stages only `app/` and `live-rs/`, and asks before committing and pushing. See [the full import instructions](docs/SOURCE_IMPORT.md).
+## What you can do with ShuKanji
 
-```powershell
-git clone https://github.com/avelatojr-source/Shukanji.git
-cd Shukanji
-powershell -ExecutionPolicy Bypass -File .\scripts\import-organized-source.ps1 -ArchivePath "$HOME\Downloads\ShuKanji-Organized-Source.zip"
-```
+- **Follow the conversation.** Read TikTok LIVE chat in a chronological feed without constantly checking another screen.
+- **See the room come alive.** Keep track of gifts, likes, follows, shares, joins, and viewer information as events arrive.
+- **Get your stream ready.** Sign in to Streamlabs to retrieve your RTMP server and stream key, or enter RTMP details manually.
+- **Work with OBS.** Connect through OBS WebSocket, apply your stream settings, and read them back to verify the configuration. Start or stop OBS output with an explicit action.
+- **Keep busy streams readable.** ShuKanji handles combo-gift updates, totals gift diamond changes, and groups high-volume like activity to make the feed easier to follow.
 
-## Features
+## How it fits into your stream
 
-### Stream setup and OBS control
-- Streamlabs browser-based OAuth PKCE sign-in, pasted-token support, and an opt-in, read-only local token scan.
-- Retrieves an RTMP server URL and stream key from Streamlabs, with manual RTMP entry as an alternative.
-- Connects to OBS Studio through OBS WebSocket 5.x, reads stream status, applies custom RTMP settings, and reads the settings back to verify them.
-- Starts and stops OBS output only after an explicit user action.
-- Reconnects with backoff and re-checks OBS state after reconnecting.
+1. **Connect your stream details.** Use Streamlabs to retrieve your RTMP server and stream key, or enter them yourself.
+2. **Connect OBS Studio.** ShuKanji communicates with OBS over OBS WebSocket and can apply and verify your stream settings.
+3. **Open your TikTok LIVE monitor.** Connect using the LIVE creator's username and watch chat and audience events appear in the feed.
+4. **Stay in control.** Start or stop OBS output when you're ready.
 
-### TikTok LIVE activity monitor
-- Connects to a TikTok LIVE by username.
-- Displays chat, joins, follows, shares, likes, gifts, and viewer information in one chronological feed.
-- De-duplicates combo-gift updates and accumulates gift diamond totals from event deltas.
-- Coalesces high-volume likes and caches avatars, gift artwork, emotes, and emoji images locally.
+The TikTok LIVE monitor is separate from the Streamlabs credential workflow. ShuKanji reads the LIVE; it does **not** send chat messages.
 
-The monitor is independent of the Streamlabs credential workflow. ShuKanji reads a LIVE; it does **not** send chat messages.
+## What ShuKanji is — and isn't
 
-## Status accuracy
+ShuKanji brings useful parts of a streaming workflow together, but it doesn't claim to do everything for you.
 
-A retrieved stream key does not prove that TikTok has accepted a broadcast. ShuKanji distinguishes between:
-1. Stream credentials retrieved.
-2. OBS settings applied and verified.
-3. OBS output running.
-4. TikTok LIVE broadcast status.
+- Retrieving a stream key does not mean TikTok has accepted a broadcast.
+- Seeing OBS output running does not prove that the TikTok LIVE is active.
+- ShuKanji distinguishes between credentials being retrieved, OBS settings being applied and verified, OBS output running, and TikTok LIVE broadcast status.
 
-**OBS output running does not, by itself, verify that the TikTok LIVE is active.**
+## What you'll need
 
-## Requirements
+- Windows 10 or Windows 11 (64-bit)
+- OBS Studio 28 or later, with OBS WebSocket enabled (the usual port is `4455`)
+- A Streamlabs account linked to TikTok for managed credential retrieval, or your own RTMP server and stream key
+- Rust 1.85 or later if you're building the desktop app from source (edition 2024)
 
-- Windows 10 or Windows 11, 64-bit.
-- OBS Studio 28 or later, with the OBS WebSocket server enabled (default port `4455`).
-- A Streamlabs account linked to TikTok for managed credential retrieval. Manual RTMP entry is also available.
-- Rust 1.85 or later for the desktop app (edition 2024).
+## Project status
 
-## Repository layout
+The repository is being prepared for the complete source release. **At the moment, this GitHub tree contains project documentation and the source-import helper; the `app/` and `live-rs/` source directories have not yet been added.** That means you can't build ShuKanji from this repository just yet.
 
-The intended repository has two sibling Rust crates because the app uses `../live-rs` as a local Cargo path dependency. This is intentionally **not** a Cargo workspace.
+When the source import is complete, the layout will look like this:
 
 ```text
 Shukanji/
+├── app/       # Windows desktop app (Rust + egui)
+├── live-rs/   # TikTok LIVE client library
+├── docs/      # Project and release documentation
+├── scripts/   # Source import helper
 ├── README.md
-├── .gitignore
-├── LICENSE                 # MIT — desktop application
-├── app/                    # Rust + egui Windows desktop app
-│   ├── Cargo.toml
-│   ├── Cargo.lock
-│   ├── build.rs
-│   ├── assets/
-│   ├── src/
-│   └── tests/
-├── live-rs/                # Local piratetok-live-rs crate (0BSD)
-│   ├── Cargo.toml
-│   ├── src/
-│   ├── examples/
-│   └── tests/
-├── scripts/
-│   └── import-organized-source.ps1
-└── docs/
-    ├── ARCHITECTURE.md
-    ├── MANUAL_OBS_CHECKLIST.md
-    ├── RELEASING.md
-    └── SOURCE_IMPORT.md
+└── LICENSE
 ```
 
-## Import the source
+The two Rust crates are kept side by side because the desktop app uses `../live-rs` as a local Cargo dependency. They are intentionally not a Cargo workspace.
 
-Clone the repository, download the organized source ZIP from the project handoff, and run the PowerShell helper described in [docs/SOURCE_IMPORT.md](docs/SOURCE_IMPORT.md). It checks the archive, copies the two crates into the correct sibling layout, stages the source, and asks before committing and pushing.
+## Building from source
 
-## Build and test
-
-After the source directories have been pushed, run the desktop app commands from `app/`:
+Once `app/` and `live-rs/` are present, run the desktop app checks from `app/`:
 
 ```powershell
 cargo fmt --check
@@ -96,38 +69,37 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release
 ```
 
-The `live-rs` crate is checked separately:
+Then check the LIVE client separately from `live-rs/`:
 
 ```powershell
-cd ..\live-rs
 cargo test
 ```
 
-See [Architecture](docs/ARCHITECTURE.md), [Release checklist](docs/RELEASING.md), and the [manual OBS verification checklist](docs/MANUAL_OBS_CHECKLIST.md).
+More detail is in [the architecture notes](docs/ARCHITECTURE.md), [the manual OBS checklist](docs/MANUAL_OBS_CHECKLIST.md), and [the release checklist](docs/RELEASING.md).
 
-## Configuration and security
+## Downloading the app
 
-The application stores non-secret settings, logs, and its image cache below:
+A ready-to-use Windows download has **not yet been published as a GitHub Release**. When a release is available, this section will link to the downloadable app package. The executable belongs in GitHub Releases, not in the source-code history.
+
+## Your settings and privacy
+
+ShuKanji keeps non-secret settings, logs, and its image cache under:
 
 ```text
-%APPDATA%\TikTokStreamTool\
+%APPDATA%\\TikTokStreamTool\\
 ```
 
-That directory name is retained for compatibility with existing installations. Streamlabs tokens and OBS passwords are stored through the Windows Credential Manager integration; they are not intended to be written to `config.toml`. The local Streamlabs token scan is opt-in and read-only. Logs redact secret values.
+That folder name is retained for compatibility with existing installations. Streamlabs tokens and OBS passwords are stored through the Windows Credential Manager integration rather than being written to `config.toml`. The optional local Streamlabs token scan is read-only, and logs redact secret values.
 
-The Streamlabs endpoints used by the app are undocumented internal endpoints, not a stable public API. Treat their continued availability as an external compatibility risk.
-
-## Versioning
-
-The supplied desktop application manifest declares version `0.1.0`; the `live-rs` crate independently declares version `0.5.0`. A Git tag named `v1.0` does not change Cargo package metadata. Before a v1.0 release, update the app manifest, lockfile, app README, and release notes together—or tag the actual app version.
-
-## Releases
-
-Keep `target/`, `dist/`, `Source code/`, and executable build output out of Git. Build the Windows executable from `app/` and attach `shukanji.exe` (or a release ZIP containing it and the user guide) to a GitHub Release.
+One thing to be aware of: the Streamlabs endpoints used for credential retrieval are undocumented internal endpoints, not a stable public API. Their availability may change outside ShuKanji's control.
 
 ## Licenses
 
-- Desktop application: MIT, as declared in `app/Cargo.toml`.
-- `live-rs/`: 0BSD, as declared in its own crate manifest. Preserve its upstream license file and attribution.
+- Desktop application: MIT
+- `live-rs/` client library: 0BSD
 
-The desktop application's root `LICENSE` does not replace the separate `live-rs` license.
+The library keeps its own license; the root MIT license does not replace it.
+
+---
+
+ShuKanji is an independent community-built project. It is not affiliated with, endorsed by, or sponsored by TikTok, Streamlabs, or OBS.
