@@ -7,6 +7,16 @@ Built with Rust and egui, the project consists of a Windows desktop application 
 > [!IMPORTANT]
 > This GitHub repository currently contains the project documentation and import helper. The full Rust source tree and embedded binary assets still need to be imported from the organized source archive. Do not treat the repository as buildable until `app/` and `live-rs/` have been pushed and a Windows build has been checked.
 
+## Import the complete source
+
+The source code and embedded binary assets are not yet in this GitHub tree. Download the `ShuKanji-Organized-Source.zip` archive supplied with the project handoff, clone this repository, and run the checked-in [PowerShell importer](scripts/import-organized-source.ps1). It validates the two sibling Cargo crates and required assets, stages only `app/` and `live-rs/`, and asks before committing and pushing. See [the full import instructions](docs/SOURCE_IMPORT.md).
+
+```powershell
+git clone https://github.com/avelatojr-source/Shukanji.git
+cd Shukanji
+powershell -ExecutionPolicy Bypass -File .\scripts\import-organized-source.ps1 -ArchivePath "$HOME\Downloads\ShuKanji-Organized-Source.zip"
+```
+
 ## Features
 
 ### Stream setup and OBS control
