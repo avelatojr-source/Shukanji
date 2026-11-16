@@ -1,0 +1,22 @@
+# Rust build output, at any crate depth
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Release artifacts and generated packaging
+/dist/
+/Source code/
+*.exe
+
+# Local settings, logs, and secrets
+**/config.toml
+.env
+!.env.example
+*.log
+
+# Operating-system / editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
