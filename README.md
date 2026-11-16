@@ -5,7 +5,7 @@
 Built with Rust and egui, the project consists of a Windows desktop application and a separate Rust TikTok LIVE client.
 
 > [!IMPORTANT]
-> This initial GitHub commit contains the project documentation only. The Rust source tree and embedded binary assets still need to be pushed from the organized source archive. Do not treat this repository as buildable until `app/` and `live-rs/` have been added.
+> This GitHub repository currently contains the project documentation and import helper. The full Rust source tree and embedded binary assets still need to be imported from the organized source archive. Do not treat the repository as buildable until `app/` and `live-rs/` have been pushed and a Windows build has been checked.
 
 ## Features
 
@@ -41,9 +41,9 @@ A retrieved stream key does not prove that TikTok has accepted a broadcast. ShuK
 - A Streamlabs account linked to TikTok for managed credential retrieval. Manual RTMP entry is also available.
 - Rust 1.85 or later for the desktop app (edition 2024).
 
-## Intended repository layout
+## Repository layout
 
-The two Rust crates must remain sibling directories because the app uses `../live-rs` as a local Cargo path dependency. This is intentionally **not** a Cargo workspace.
+The intended repository has two sibling Rust crates because the app uses `../live-rs` as a local Cargo path dependency. This is intentionally **not** a Cargo workspace.
 
 ```text
 Shukanji/
@@ -62,21 +62,28 @@ Shukanji/
 │   ├── src/
 │   ├── examples/
 │   └── tests/
+├── scripts/
+│   └── import-organized-source.ps1
 └── docs/
     ├── ARCHITECTURE.md
     ├── MANUAL_OBS_CHECKLIST.md
-    └── RELEASING.md
+    ├── RELEASING.md
+    └── SOURCE_IMPORT.md
 ```
+
+## Import the source
+
+Clone the repository, download the organized source ZIP from the project handoff, and run the PowerShell helper described in [docs/SOURCE_IMPORT.md](docs/SOURCE_IMPORT.md). It checks the archive, copies the two crates into the correct sibling layout, stages the source, and asks before committing and pushing.
 
 ## Build and test
 
 After the source directories have been pushed, run the desktop app commands from `app/`:
 
 ```powershell
-cargo build --release
 cargo fmt --check
 cargo test --all-targets
 cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release
 ```
 
 The `live-rs` crate is checked separately:
@@ -90,7 +97,7 @@ See [Architecture](docs/ARCHITECTURE.md), [Release checklist](docs/RELEASING.md)
 
 ## Configuration and security
 
-The current application stores non-secret settings, logs, and its image cache below:
+The application stores non-secret settings, logs, and its image cache below:
 
 ```text
 %APPDATA%\TikTokStreamTool\
