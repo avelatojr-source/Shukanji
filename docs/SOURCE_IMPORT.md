@@ -2,28 +2,31 @@
 
 ## Current GitHub status
 
-The repository currently has the project README, ignore rules, license files, and engineering documentation. The Rust application source and bundled assets are not yet expanded into the GitHub tree. The repository is not buildable until both crates and all embedded assets are present.
+The repository currently contains the project README, ignore rules, license files, engineering documentation, and the source-import helper. The Rust application source, TikTok LIVE client source, and embedded binary assets are not yet expanded into the GitHub tree. The repository is **not buildable** until both crates and all embedded assets are present.
 
 ## Why a local import is needed
 
-The complete source archive is several megabytes and includes binary font, icon, and mascot assets. Use the local Git client to copy those exact bytes into the repository; the helper below checks the archive and preserves the sibling-crate layout.
+The organized source archive contains several megabytes of source and binary assets (fonts, Windows icons, and mascot WebP files). The connected GitHub API can edit text files, but it cannot transfer this complete binary archive or run `git push` from your Windows checkout. The local Git client can transfer the exact archive bytes without converting or truncating them.
 
 ## Import using the PowerShell helper
 
-1. Download the [organized source archive](https://github.com/avelatojr-source/Shukanji) from the project handoff provided with this repository update.
+1. Download `ShuKanji-Organized-Source.zip` from the file link supplied with this handoff and save it locally, for example at `$HOME\Downloads\ShuKanji-Organized-Source.zip`.
 2. Clone this repository:
+
    ```powershell
    git clone https://github.com/avelatojr-source/Shukanji.git
    cd Shukanji
    ```
-3. Save the organized source ZIP locally, for example at `$HOME\Downloads\ShuKanji-Organized-Source.zip`.
-4. Run:
+
+3. Run the checked-in helper:
+
    ```powershell
    powershell -ExecutionPolicy Bypass -File .\scripts\import-organized-source.ps1 -ArchivePath "$HOME\Downloads\ShuKanji-Organized-Source.zip"
    ```
-5. Review the staged file list. The script asks before it commits and pushes.
 
-The helper copies only `app/` and `live-rs/`; it preserves this repository's top-level README and docs. It validates the important Cargo files and `../live-rs` path dependency, and refuses archives containing nested `.git`, `target/`, `dist/`, `Source code/`, `config.toml`, or `.exe` files. It never force-pushes.
+4. Review the staged file list. The script asks before it commits and pushes. Answer `y` to publish the source.
+
+The helper copies only `app/` and `live-rs/`; it preserves this repository's top-level README and docs. It validates the required Cargo files, the `../live-rs` path dependency, four font files, the Windows icon and the three mascot WebP files. It refuses archives containing nested `.git`, `target/`, `dist/`, `Source code/`, `config.toml`, or `.exe` files. It also requires a clean `main` checkout up to date with `origin/main`. It never force-pushes.
 
 ## Required layout
 
