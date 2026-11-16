@@ -1,18 +1,50 @@
-# Source import status
+# Import the complete source tree
 
-The project source archive was reorganized into a repository layout with sibling `app/` and `live-rs/` Rust crates, plus project documentation.
+## Current GitHub status
 
-This GitHub repository currently contains the project overview, repository ignore rules, licenses, and engineering documentation. The full application source and embedded binary assets have **not** yet been uploaded to this repository.
+The repository currently has the project README, ignore rules, license files, and engineering documentation. The Rust application source and bundled assets are not yet expanded into the GitHub tree. The repository is not buildable until both crates and all embedded assets are present.
 
-The app embeds binary font files, mascot images, and Windows application icons at compile time. Those files are part of the source and must be committed with the Rust code; omitting them would leave the repository incomplete and may prevent the application from compiling.
+## Why a local import is needed
 
-## Complete the import from the organized source archive
+The complete source archive is several megabytes and includes binary font, icon, and mascot assets. Use the local Git client to copy those exact bytes into the repository; the helper below checks the archive and preserves the sibling-crate layout.
 
-1. Download and extract `ShuKanji-Organized-Source.zip`.
-2. Copy the contents of the extracted `ShuKanji-Organized/` directory into the root of this repository.
-3. Keep `app/` and `live-rs/` as sibling directories. Do not turn the repository into a nested Git repository or a Cargo workspace.
-4. Confirm `app/Cargo.toml` still points to `../live-rs`.
-5. Run the release checklist in [RELEASING.md](RELEASING.md).
-6. Check `git status` and confirm no `target/`, `dist/`, `Source code/`, `config.toml`, or executable output is staged.
+## Import using the PowerShell helper
 
-The repository should only be described as buildable after the full source tree, including its embedded assets, has been pushed and a Windows build has been checked.
+1. Download the [organized source archive](https://github.com/avelatojr-source/Shukanji) from the project handoff provided with this repository update.
+2. Clone this repository:
+   ```powershell
+   git clone https://github.com/avelatojr-source/Shukanji.git
+   cd Shukanji
+   ```
+3. Save the organized source ZIP locally, for example at `$HOME\Downloads\ShuKanji-Organized-Source.zip`.
+4. Run:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\import-organized-source.ps1 -ArchivePath "$HOME\Downloads\ShuKanji-Organized-Source.zip"
+   ```
+5. Review the staged file list. The script asks before it commits and pushes.
+
+The helper copies only `app/` and `live-rs/`; it preserves this repository's top-level README and docs. It validates the important Cargo files and `../live-rs` path dependency, and refuses archives containing nested `.git`, `target/`, `dist/`, `Source code/`, `config.toml`, or `.exe` files. It never force-pushes.
+
+## Required layout
+
+Keep the two crates as siblings:
+
+```text
+Shukanji/
+├── app/
+│   ├── Cargo.toml
+│   ├── Cargo.lock
+│   ├── build.rs
+│   ├── assets/
+│   └── src/
+└── live-rs/
+    ├── Cargo.toml
+    ├── src/
+    └── tests/
+```
+
+Do not put `live-rs` inside `app/`, and do not create nested Git repositories. The desktop crate intentionally uses `path = "../live-rs"`.
+
+## After pushing
+
+On Windows, verify the build from `app/` and run the `live-rs` tests separately. See [RELEASING.md](RELEASING.md) and [MANUAL_OBS_CHECKLIST.md](MANUAL_OBS_CHECKLIST.md). Do not mark a release build-ready until these checks have passed on Windows.
