@@ -157,8 +157,10 @@ pub struct App {
     pub page: Page,
     pub theme_choice: theme::ThemeChoice,
     /// Result of the last font scan (custom + system fallbacks), shown in
-    /// Settings → Chat fonts.
+    /// Settings → Chat fonts. Filled in by the background font loader.
     pub font_report: crate::ui::fonts::FontReport,
+    /// One-shot channel from the background font loader; `None` once drained.
+    font_rx: Option<std::sync::mpsc::Receiver<crate::ui::fonts::FontReport>>,
     pub tebby: crate::ui::tebby::Tebby,
     pub display_name: String,
     pub show_timestamps: bool,
@@ -179,8 +181,11 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let font_report = theme::apply(&cc.egui_ctx);
+        theme::apply(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        // Custom + system fonts load off the UI thread; the report arrives on
+        // this channel and is drained in `update`.
+        let font_rx = crate::ui::fonts::spawn_extended(cc.egui_ctx.clone());
 
         let config = AppConfig::load().unwrap_or_default();
         let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
@@ -249,7 +254,11 @@ impl App {
             apply_request_id: 0,
             page: Page::Setup,
             theme_choice: theme::ThemeChoice::System,
-            font_report,
+            font_report: crate::ui::fonts::FontReport {
+                custom_dir: crate::ui::fonts::custom_font_dir(),
+                ..crate::ui::fonts::FontReport::default()
+            },
+            font_rx: Some(font_rx),
             tebby: crate::ui::tebby::Tebby::default(),
             display_name: "your_name".to_string(),
             show_timestamps: true,
@@ -855,6 +864,17 @@ impl eframe::App for App {
         self.images.poll(ctx);
         self.tick_search(ctx);
         self.expire_toast();
+        // Pick up the background font scan once it lands.
+        let loaded = self.font_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(report) = loaded {
+            self.font_report = report;
+            self.font_rx = None;
+        }
+        // Wake up exactly when the toast expires instead of relying on
+        // incidental repaints (no continuous repaint loop needed).
+        if let Some(toast) = &self.toast {
+            ctx.request_repaint_after(toast.until.saturating_duration_since(Instant::now()));
+        }
         crate::ui::panels::render(self, ctx);
     }
 }

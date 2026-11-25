@@ -35,6 +35,13 @@ pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     )
 }
 
+/// Multiply a color's alpha. Used to fade labels in/out while the sidebar
+/// width animates between its minimized and expanded states.
+pub fn with_alpha(c: Color32, alpha: f32) -> Color32 {
+    let a = (c.a() as f32 * alpha.clamp(0.0, 1.0)).round() as u8;
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
+}
+
 /// 0 → 1 hover fade for a custom-painted widget. egui keeps requesting
 /// repaints while the value animates, so no timer is needed.
 pub fn hover_t(ui: &Ui, response: &Response, active: bool) -> f32 {
@@ -541,8 +548,10 @@ pub fn avatar_image(ui: &mut Ui, texture: &egui::TextureHandle, size: f32) {
     );
 }
 
-/// A sidebar nav row with an icon. Returns the response.
-pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool) -> Response {
+/// A sidebar nav row with an icon. `expand` is the sidebar's animated
+/// expansion (1 = fully expanded, 0 = minimized rail): the icon slides from
+/// its left slot to the rail center and the label fades with it.
+pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool, expand: f32) -> Response {
     let p = theme::pal(ui.ctx());
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
@@ -567,23 +576,25 @@ pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool) -> Response {
         );
     }
     let tint = lerp_color(p.text_soft, p.text, at.max(ht));
-    // With no label (the minimized rail) the icon is centered; otherwise it
-    // sits at the left with the label beside it.
+    // Expanded: icon in its left slot beside the label. Minimized rail: icon
+    // centered. The two positions are interpolated during the transition.
     let icon_x = if text.is_empty() {
         rect.center().x - 8.0
     } else {
-        rect.left() + 10.0
+        let expanded_x = rect.left() + 10.0;
+        let rail_x = rect.center().x - 8.0;
+        expanded_x + (rail_x - expanded_x) * (1.0 - expand)
     };
     let icon_rect =
         Rect::from_min_size(egui::pos2(icon_x, rect.center().y - 8.0), Vec2::splat(16.0));
     paint_icon(ui, icon, icon_rect, tint);
-    if !text.is_empty() {
+    if !text.is_empty() && expand > 0.02 {
         ui.painter().text(
             egui::pos2(rect.left() + 36.0, rect.center().y),
             Align2::LEFT_CENTER,
             text,
             FontId::proportional(14.0),
-            tint,
+            with_alpha(tint, expand),
         );
     }
     response

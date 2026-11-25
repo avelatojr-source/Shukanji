@@ -5,6 +5,21 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 
 ## What changed
 
+### 0. Smooth minimizer animations + performance pass (latest)
+
+- **Sidebar minimizer is now fully animated** (180 ms): the width slides
+  between 220 px and the 68 px rail, the wordmark/display name fade, nav icons
+  slide from their left slot to the rail center, labels fade out, and the group
+  captions crossfade into the centered rules — no more instant snapping.
+- **Go Live bar collapse is animated** (160 ms): height eases between 76 px and
+  the 34 px strip (padding too); contents swap at the midpoint.
+- **Faster start-up:** the window now appears immediately with the bundled
+  fonts; the ~70 MB of custom + Windows fallback fonts are read on a background
+  thread (`font-load`) and installed when ready, with the settings report
+  delivered over a channel. The "Reload fonts" button still rescans on demand.
+- **Repaint scheduling for toasts:** the UI wakes exactly when a toast expires
+  instead of waiting for incidental repaints — no continuous repaint loop.
+
 ### 1. Smooth transitions on buttons and interactive widgets
 
 Every custom-painted control now eases between states instead of flipping
@@ -57,12 +72,12 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 
 | File | Change |
 | --- | --- |
-| `app/src/ui/fonts.rs` | **New** — font discovery, fallback chain, scan report, tests |
-| `app/src/ui/theme.rs` | Font install moved to `fonts.rs`; `apply` returns the report |
+| `app/src/ui/fonts.rs` | **New** — font discovery, fallback chain, scan report, tests; bundled fast path + background extended loader |
+| `app/src/ui/theme.rs` | Font install moved to `fonts.rs` (bundled fast path at start-up) |
 | `app/src/ui/mod.rs` | Register `fonts` module |
-| `app/src/app.rs` | Store `font_report` for the settings page |
-| `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp helpers + tests |
-| `app/src/ui/panels.rs` | Animated chat tabs + theme cards; new Chat fonts settings section |
+| `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling |
+| `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp/alpha helpers + tests |
+| `app/src/ui/panels.rs` | Animated chat tabs + theme cards; Chat fonts settings section; animated sidebar + Go Live bar minimizers |
 | `docs/CHAT_REPLY_RESEARCH.md` | **New** — chat-reply findings and API contract |
 | `docs/UPDATE.md` | **New** — this file |
 

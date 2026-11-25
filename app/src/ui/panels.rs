@@ -20,7 +20,15 @@ use super::widgets::{self, BtnKind};
 
 pub fn render(app: &mut App, ctx: &egui::Context) {
     let p = theme::pal(ctx);
-    let sidebar_width = if app.sidebar_minimized { 68.0 } else { 220.0 };
+    // Animated minimizer: the width slides and `expand` drives the label
+    // fades/icon slide inside the sidebar (1 = expanded, 0 = rail).
+    let minimized_t = ctx.animate_value_with_time(
+        egui::Id::new("shukanji.sidebar_minimized"),
+        if app.sidebar_minimized { 1.0 } else { 0.0 },
+        0.18,
+    );
+    let expand = 1.0 - minimized_t;
+    let sidebar_width = 220.0 + (68.0 - 220.0) * minimized_t;
     egui::SidePanel::left("sidebar")
         .exact_width(sidebar_width)
         .resizable(false)
@@ -29,7 +37,7 @@ pub fn render(app: &mut App, ctx: &egui::Context) {
                 .fill(p.sidebar)
                 .inner_margin(Margin::symmetric(12, 20)),
         )
-        .show(ctx, |ui| sidebar(ui, app));
+        .show(ctx, |ui| sidebar(ui, app, expand));
 
     // Two-row header when the status strip cannot sit beside the title.
     let header_height = if ctx.screen_rect().width() < HEADER_TWO_ROW_BELOW {
@@ -47,20 +55,24 @@ pub fn render(app: &mut App, ctx: &egui::Context) {
         )
         .show(ctx, |ui| header(ui, app));
 
-    // The bar minimizes to a thin strip to free vertical space.
-    let go_live_collapsed = app.go_live_bar_collapsed;
+    // The bar minimizes to a thin strip; its height eases between the two
+    // sizes and the content swaps at the midpoint of the animation.
+    let collapse_t = ctx.animate_value_with_time(
+        egui::Id::new("shukanji.go_live_bar_collapsed"),
+        if app.go_live_bar_collapsed { 1.0 } else { 0.0 },
+        0.16,
+    );
     egui::TopBottomPanel::bottom("go_live_bar")
-        .exact_height(if go_live_collapsed { 34.0 } else { 76.0 })
+        .exact_height(76.0 + (34.0 - 76.0) * collapse_t)
         .frame(
             egui::Frame::new()
                 .fill(p.sidebar)
-                .inner_margin(if go_live_collapsed {
-                    Margin::symmetric(40, 4)
-                } else {
-                    Margin::symmetric(40, 16)
-                }),
+                .inner_margin(Margin::symmetric(
+                    40,
+                    (16.0 + (4.0 - 16.0) * collapse_t).round() as _,
+                )),
         )
-        .show(ctx, |ui| bottom_bar(ui, app));
+        .show(ctx, |ui| bottom_bar(ui, app, collapse_t));
 
     egui::CentralPanel::default()
         .frame(egui::Frame::new().fill(p.bg).inner_margin(Margin {
@@ -98,12 +110,13 @@ pub fn render(app: &mut App, ctx: &egui::Context) {
 
 // ------------------------------------------------------------------- sidebar
 
-fn sidebar(ui: &mut egui::Ui, app: &mut App) {
+fn sidebar(ui: &mut egui::Ui, app: &mut App, expand: f32) {
     let p = theme::pal(ui.ctx());
-    let minimized = app.sidebar_minimized;
 
     ui.horizontal(|ui| {
-        let avatar_size = if minimized { 40.0 } else { 48.0 };
+        // Avatar shrinks slightly as the rail closes; the wordmark and the
+        // display name fade out with the expansion value.
+        let avatar_size = 40.0 + 8.0 * expand;
         let tebby_avatar = if theme::choice(ui.ctx()) == theme::ThemeChoice::Tebby {
             app.tebby.avatar_texture().cloned()
         } else {
@@ -113,47 +126,57 @@ fn sidebar(ui: &mut egui::Ui, app: &mut App) {
             Some(texture) => widgets::avatar_image(ui, &texture, avatar_size),
             None => widgets::avatar(ui, &app.display_name, avatar_size),
         }
-        if !minimized {
+        if expand > 0.01 {
             ui.add_space(4.0);
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 ui.label(
                     RichText::new("ShuKanji")
                         .family(theme::wordmark_family())
+                        .color(widgets::with_alpha(p.text, expand))
                         .size(22.0),
                 );
-                ui.label(RichText::new(&app.display_name).color(p.muted).size(12.0));
+                ui.label(
+                    RichText::new(&app.display_name)
+                        .color(widgets::with_alpha(p.muted, expand))
+                        .size(12.0),
+                );
             });
         }
     });
 
     ui.add_space(16.0);
-    // Expanded: a full-width hairline plus the group captions. Minimized: each
-    // group caption becomes a short centered rule (matches the prototype).
-    if !minimized {
-        widgets::hairline(ui);
-        ui.add_space(10.0);
+    // The hairline keeps its slot and fades, so nothing jumps mid-animation.
+    let width = ui.available_width();
+    let (line_rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
+    if expand > 0.01 {
+        ui.painter().rect_filled(
+            line_rect,
+            CornerRadius::ZERO,
+            widgets::with_alpha(p.line, expand),
+        );
     }
-    group_label(ui, "Stream", minimized);
-    nav(ui, app, Page::Setup, "setup", "Stream setup", minimized);
-    nav(ui, app, Page::Live, "live", "Live dashboard", minimized);
+    ui.add_space(10.0);
+
+    group_label(ui, "Stream", expand);
+    nav(ui, app, Page::Setup, "setup", "Stream setup", expand);
+    nav(ui, app, Page::Live, "live", "Live dashboard", expand);
     nav(
         ui,
         app,
         Page::Account,
         "account",
         "Streamlabs account",
-        minimized,
+        expand,
     );
-    nav(ui, app, Page::Obs, "obs", "OBS connection", minimized);
+    nav(ui, app, Page::Obs, "obs", "OBS connection", expand);
 
-    group_label(ui, "Tools", minimized);
-    nav(ui, app, Page::Log, "log", "Activity log", minimized);
-    nav(ui, app, Page::Settings, "settings", "Settings", minimized);
+    group_label(ui, "Tools", expand);
+    nav(ui, app, Page::Log, "log", "Activity log", expand);
+    nav(ui, app, Page::Settings, "settings", "Settings", expand);
 
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        let label = if minimized { "" } else { "Minimize" };
-        if widgets::nav_item(ui, "minimize", label, false)
+        if widgets::nav_item(ui, "minimize", "Minimize", false, expand)
             .on_hover_text("Minimize / expand sidebar (Ctrl+B)")
             .clicked()
         {
@@ -165,38 +188,34 @@ fn sidebar(ui: &mut egui::Ui, app: &mut App) {
     });
 }
 
-fn group_label(ui: &mut egui::Ui, text: &str, minimized: bool) {
+fn group_label(ui: &mut egui::Ui, text: &str, expand: f32) {
     let p = theme::pal(ui.ctx());
-    if minimized {
-        ui.add_space(10.0);
-        let width = ui.available_width();
-        let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 1.0), Sense::hover());
-        let center = rect.center();
-        let half = 14.0;
+    // Fixed height so nothing jumps: the expanded caption and the minimized
+    // centered rule crossfade inside the same slot.
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 26.0), Sense::hover());
+    if expand > 0.01 {
+        ui.painter().text(
+            egui::pos2(rect.left(), rect.center().y),
+            Align2::LEFT_CENTER,
+            text.to_uppercase(),
+            FontId::proportional(11.0),
+            widgets::with_alpha(p.muted, expand),
+        );
+    }
+    let rule = 1.0 - expand;
+    if rule > 0.01 {
+        let c = rect.center();
         ui.painter().line_segment(
-            [
-                egui::pos2(center.x - half, center.y),
-                egui::pos2(center.x + half, center.y),
-            ],
-            Stroke::new(1.0_f32, p.line),
+            [egui::pos2(c.x - 14.0, c.y), egui::pos2(c.x + 14.0, c.y)],
+            Stroke::new(1.0_f32, widgets::with_alpha(p.line, rule)),
         );
-        ui.add_space(10.0);
-    } else {
-        ui.add_space(12.0);
-        ui.label(
-            RichText::new(text.to_uppercase())
-                .color(p.muted)
-                .size(11.0)
-                .strong(),
-        );
-        ui.add_space(2.0);
     }
 }
 
-fn nav(ui: &mut egui::Ui, app: &mut App, page: Page, icon: &str, label: &str, minimized: bool) {
-    let display = if minimized { "" } else { label };
+fn nav(ui: &mut egui::Ui, app: &mut App, page: Page, icon: &str, label: &str, expand: f32) {
     let active = app.page == page;
-    let response = widgets::nav_item(ui, icon, display, active);
+    let response = widgets::nav_item(ui, icon, label, active, expand);
     let response = response.on_hover_text(label);
     if response.clicked() {
         app.page = page;
@@ -317,14 +336,15 @@ fn theme_toggle(ui: &mut egui::Ui, app: &mut App) {
 
 // ---------------------------------------------------------------- bottom bar
 
-fn bottom_bar(ui: &mut egui::Ui, app: &mut App) {
+fn bottom_bar(ui: &mut egui::Ui, app: &mut App, collapse_t: f32) {
     let p = theme::pal(ui.ctx());
     let rect = ui.max_rect();
     let hint = go_live_hint(app);
 
     let streaming = app.is_streaming();
 
-    if app.go_live_bar_collapsed {
+    // Swap the contents halfway through the height animation.
+    if collapse_t > 0.5 {
         // Minimized: nothing but the restore arrow. The Go Live button is
         // hidden with the rest of the bar — expand it again to go live.
         ui.horizontal(|ui| {

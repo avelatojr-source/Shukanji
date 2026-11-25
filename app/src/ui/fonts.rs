@@ -43,11 +43,39 @@ pub fn custom_font_dir() -> Option<PathBuf> {
     paths::config_dir().map(|dir| dir.join("fonts"))
 }
 
-/// Install the full font chain on the context. Call once at start-up.
+/// Install the full font chain on the context, synchronously. Used by the
+/// settings "Reload fonts" button.
 pub fn install(ctx: &egui::Context) -> FontReport {
     let (fonts, report) = build();
     ctx.set_fonts(fonts);
     report
+}
+
+/// Fast start-up path: install **only the bundled faces** (no disk I/O), so
+/// the first window frame is not blocked reading ~70 MB of system fonts.
+/// The extended chain arrives moments later via [`spawn_extended`].
+pub fn install_bundled(ctx: &egui::Context) {
+    let mut fonts = bundled();
+    order_families(&mut fonts, &[], &[]);
+    ctx.set_fonts(fonts);
+}
+
+/// Load custom + system fonts on a background thread and install the full
+/// chain when ready. Returns a channel that yields the scan report exactly
+/// once; the UI should poll it and store the report for the settings page.
+pub fn spawn_extended(ctx: egui::Context) -> std::sync::mpsc::Receiver<FontReport> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _ = std::thread::Builder::new()
+        .name("font-load".to_string())
+        .spawn(move || {
+            let (fonts, report) = build();
+            // `set_fonts` only queues new definitions (lazy rebuild), and the
+            // repaint makes the UI pick them up immediately.
+            ctx.set_fonts(fonts);
+            ctx.request_repaint();
+            let _ = tx.send(report);
+        });
+    rx
 }
 
 /// Re-scan user + system fonts and rebuild the chain. Existing text re-layouts
@@ -101,8 +129,14 @@ fn build() -> (FontDefinitions, FontReport) {
         }
     }
 
-    // Order matters: primary face, user fonts, system fallbacks, the egui
-    // defaults that shipped with FontDefinitions, then monochrome emoji.
+    order_families(&mut fonts, &custom_ids, &system_ids);
+
+    (fonts, report)
+}
+
+/// Order matters: primary face, user fonts, system fallbacks, the egui
+/// defaults that shipped with FontDefinitions, then monochrome emoji.
+fn order_families(fonts: &mut FontDefinitions, custom_ids: &[String], system_ids: &[String]) {
     for (family, primary) in [
         (FontFamily::Proportional, "inter"),
         (FontFamily::Monospace, "jetbrains"),
@@ -117,8 +151,6 @@ fn build() -> (FontDefinitions, FontReport) {
         ordered.dedup();
         fonts.families.insert(family, ordered);
     }
-
-    (fonts, report)
 }
 
 /// The faces compiled into the binary (unchanged from the original app).

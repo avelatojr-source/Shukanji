@@ -201,10 +201,11 @@ pub fn wordmark_family() -> FontFamily {
     FontFamily::Name("wordmark".into())
 }
 
-/// Install fonts, register both theme visuals and set spacing. Call once.
-/// Returns the font scan report so the settings page can show it.
-pub fn apply(ctx: &egui::Context) -> super::fonts::FontReport {
-    let report = super::fonts::install(ctx);
+/// Install the bundled fonts, register both theme visuals and set spacing.
+/// Call once. Custom + system fonts are loaded afterwards in the background
+/// (see [`super::fonts::spawn_extended`]) so start-up never blocks on disk.
+pub fn apply(ctx: &egui::Context) {
+    super::fonts::install_bundled(ctx);
     ctx.set_visuals_of(egui::Theme::Dark, visuals(DARK, egui::Visuals::dark()));
     ctx.set_visuals_of(egui::Theme::Light, visuals(LIGHT, egui::Visuals::light()));
     ctx.all_styles_mut(|style| {
@@ -217,7 +218,6 @@ pub fn apply(ctx: &egui::Context) -> super::fonts::FontReport {
         style.spacing.scroll.bar_outer_margin = 0.0;
         style.spacing.scroll.floating = false;
     });
-    report
 }
 
 fn visuals(p: Palette, mut v: egui::Visuals) -> egui::Visuals {
