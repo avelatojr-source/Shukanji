@@ -7,6 +7,13 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 
 ### 0. Smooth minimizer animations + performance pass (latest)
 
+- **Real native window animations (Windows):** launch fades in over 240 ms,
+  the title-bar X / Alt+F4 fades out over 180 ms before shutdown, and the
+  actual title-bar minimize button fades over 180 ms before entering the real
+  minimized state. Restoring from the taskbar fades back in over 160 ms. These
+  are Win32 `AnimateWindow` effects on the real app window, separate from the
+  sidebar animation below. Close uses `DestroyWindow` after the fade so hidden
+  windows still shut down reliably; normal non-animated fallbacks remain.
 - **Sidebar minimizer is now fully animated** (180 ms): the width slides
   between 220 px and the 68 px rail, the wordmark/display name fade, nav icons
   slide from their left slot to the rail center, labels fade out, and the group
@@ -78,6 +85,10 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 | `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling |
 | `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp/alpha helpers + tests |
 | `app/src/ui/panels.rs` | Animated chat tabs + theme cards; Chat fonts settings section; animated sidebar + Go Live bar minimizers |
+| `app/src/platform/window_fx.rs` | **New** — Win32 native open/close/minimize/restore fades + tests |
+| `app/src/platform/mod.rs` | Register the Windows-only native effects module |
+| `app/src/main.rs` | Start hidden on Windows for the launch fade |
+| `app/Cargo.toml`, `app/Cargo.lock` | Add `raw-window-handle` and Windows API dependencies |
 | `docs/CHAT_REPLY_RESEARCH.md` | **New** — chat-reply findings and API contract |
 | `docs/UPDATE.md` | **New** — this file |
 

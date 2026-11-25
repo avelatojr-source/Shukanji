@@ -23,7 +23,10 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([1000.0, 640.0])
-        .with_title("ShuKanji");
+        .with_title("ShuKanji")
+        // Windows starts hidden so the first visible frame can fade in.
+        // Other platforms keep their normal native behavior.
+        .with_visible(!cfg!(windows));
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }

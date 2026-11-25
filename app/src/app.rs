@@ -174,6 +174,10 @@ pub struct App {
     /// Frames left to sanity-check the window geometry on start-up.
     window_check_frames: u8,
 
+    // native window transitions (Windows)
+    #[cfg(windows)]
+    window_fx: Option<crate::platform::window_fx::WindowEffects>,
+
     // diagnostics
     pub toast: Option<Toast>,
     pub logs: VecDeque<LogLine>,
@@ -186,6 +190,8 @@ impl App {
         // Custom + system fonts load off the UI thread; the report arrives on
         // this channel and is drained in `update`.
         let font_rx = crate::ui::fonts::spawn_extended(cc.egui_ctx.clone());
+        #[cfg(windows)]
+        let window_fx = crate::platform::window_fx::WindowEffects::new(cc);
 
         let config = AppConfig::load().unwrap_or_default();
         let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
@@ -268,6 +274,8 @@ impl App {
             started_at: Instant::now(),
             live_started_at: None,
             window_check_frames: 10,
+            #[cfg(windows)]
+            window_fx,
             toast: None,
             logs: VecDeque::new(),
         };
@@ -876,5 +884,12 @@ impl eframe::App for App {
             ctx.request_repaint_after(toast.until.saturating_duration_since(Instant::now()));
         }
         crate::ui::panels::render(self, ctx);
+
+        #[cfg(windows)]
+        if let Some(fx) = &mut self.window_fx {
+            // Opacity was set to zero before eframe's first painted frame;
+            // advance the real launch fade until the window is fully opaque.
+            fx.tick_open(ctx);
+        }
     }
 }

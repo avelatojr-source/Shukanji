@@ -80,6 +80,14 @@ zeroize = { version = "1.9.1", features = ["derive"] }
 tracing-appender = "0.2.5"
 uuid = { version = "1.29.2", features = ["v4"] }
 getrandom = "0.4.3"
+raw-window-handle = "0.6.2"
+
+# Native window open/close/minimize animations.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 wiremock = "0.6.5"
