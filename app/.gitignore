@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.pdb
+
+# Local, machine-specific artifacts (never commit secrets)
+config.toml

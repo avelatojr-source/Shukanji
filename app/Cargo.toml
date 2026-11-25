@@ -1,0 +1,96 @@
+[package]
+name = "tiktok-stream-tool"
+version = "0.1.0"
+edition = "2024"
+description = "Native Windows companion for TikTok LIVE streaming with Streamlabs credentials, OBS WebSocket control, and live event monitoring."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "shukanji"
+path = "src/main.rs"
+
+[build-dependencies]
+# Embeds the app icon + version info into the .exe so Explorer shows it.
+winresource = "0.1"
+
+[dependencies]
+# GUI
+# NOTE: eframe/egui are pinned to 0.31.1. The 0.37 release changed the App
+# trait (update -> ui) and the panel API; 0.31.1 is the newest release with the
+# stable `App::update` + Context-based panel API this code targets.
+eframe = { version = "0.31.1", default-features = false, features = [
+    "default_fonts",
+    "glow",
+    "persistence",
+] }
+egui = "0.31.1"
+# NOTE: no "http" feature. Every remote image goes through our own on-disk
+# cache and reaches egui as a `bytes://` URI, so the built-in HTTP loader (and
+# its `ehttp`/`ureq` dependency chain) would be dead weight.
+egui_extras = { version = "0.31.1", features = [
+    "image",
+    "svg",
+    "gif",
+    "webp",
+] }
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+# Async runtime + IO
+tokio = { version = "1.54.1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "net",
+    "io-util",
+] }
+futures-util = "0.3.34"
+
+# HTTP (Windows uses schannel via native-tls, no OpenSSL)
+reqwest = { version = "0.13.5", features = ["json", "multipart", "query", "blocking"] }
+
+# WebSocket (OBS)
+tokio-tungstenite = "0.30.0"
+
+# TikTok LIVE monitoring (local checkout of github.com/PirateTok/live-rs)
+piratetok-live-rs = { path = "../live-rs" }
+
+# Serialization
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.2.1"
+
+# Errors + logging
+thiserror = "2.0.21"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+
+# Secrets (Windows Credential Manager on Windows)
+keyring = { version = "4.2.0", features = ["v1"] }
+
+# Crypto / encoding for PKCE
+base64 = "0.23.1"
+sha2 = "0.11.1"
+urlencoding = "2.1.3"
+
+# Open the system browser for OAuth
+open = "5.4.5"
+zeroize = { version = "1.9.1", features = ["derive"] }
+tracing-appender = "0.2.5"
+uuid = { version = "1.29.2", features = ["v4"] }
+getrandom = "0.4.3"
+
+[dev-dependencies]
+wiremock = "0.6.5"
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+
+
