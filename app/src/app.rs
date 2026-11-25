@@ -156,6 +156,9 @@ pub struct App {
     // shell / theme / navigation
     pub page: Page,
     pub theme_choice: theme::ThemeChoice,
+    /// Result of the last font scan (custom + system fallbacks), shown in
+    /// Settings → Chat fonts.
+    pub font_report: crate::ui::fonts::FontReport,
     pub tebby: crate::ui::tebby::Tebby,
     pub display_name: String,
     pub show_timestamps: bool,
@@ -176,7 +179,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        theme::apply(&cc.egui_ctx);
+        let font_report = theme::apply(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
 
         let config = AppConfig::load().unwrap_or_default();
@@ -246,6 +249,7 @@ impl App {
             apply_request_id: 0,
             page: Page::Setup,
             theme_choice: theme::ThemeChoice::System,
+            font_report,
             tebby: crate::ui::tebby::Tebby::default(),
             display_name: "your_name".to_string(),
             show_timestamps: true,

@@ -1029,15 +1029,20 @@ fn chat_tab(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
         .layout_no_wrap(label.to_owned(), font.clone(), p.text);
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(galley.size().x + 20.0, 30.0), Sense::click());
-    let color = if active { p.text } else { p.muted };
+    // Ease the label color and the underline in/out with the active tab.
+    let at = ui.ctx().animate_bool_with_time(
+        response.id.with("active"),
+        active,
+        widgets::TRANSITION_SECS,
+    );
+    let ht = widgets::hover_t(ui, &response, response.hovered());
+    let color = widgets::lerp_color(p.muted, p.text, at.max(ht));
     ui.painter()
         .text(rect.center(), Align2::CENTER_CENTER, label, font, color);
-    if active {
-        ui.painter().hline(
-            rect.x_range(),
-            rect.bottom(),
-            Stroke::new(2.0_f32, p.accent),
-        );
+    let underline = widgets::lerp_color(Color32::TRANSPARENT, p.accent, at);
+    if underline.a() > 0 {
+        ui.painter()
+            .hline(rect.x_range(), rect.bottom(), Stroke::new(2.0_f32, underline));
     }
     response
 }
@@ -1449,6 +1454,11 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
             });
             ui.add_space(32.0);
 
+            widgets::section(ui, "Chat fonts", |ui| {
+                chat_fonts_section(ui, app);
+            });
+            ui.add_space(32.0);
+
             widgets::section(ui, "Stored data", |ui| {
                 ui.label(
                     RichText::new("Removes the saved token and OBS password from this app.")
@@ -1479,15 +1489,117 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
     );
 }
 
+/// Settings → Chat fonts: custom font folder, reload, scan report and a live
+/// multi-script preview so coverage problems are visible immediately.
+fn chat_fonts_section(ui: &mut egui::Ui, app: &mut App) {
+    let p = theme::pal(ui.ctx());
+    ui.label(
+        RichText::new(
+            "Viewer comments can use any language. ShuKanji falls back to your Windows fonts for scripts the built-in face lacks (Japanese, Chinese, Korean, Arabic, Thai and more), and you can add your own fonts below.",
+        )
+        .color(p.muted)
+        .size(13.0),
+    );
+    ui.add_space(10.0);
+
+    if let Some(dir) = app.font_report.custom_dir.clone() {
+        ui.label(
+            RichText::new("Drop .ttf / .otf / .ttc files into this folder, then press Reload fonts:")
+                .color(p.text_soft)
+                .size(13.0),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(dir.display().to_string())
+                .color(p.muted)
+                .size(12.0)
+                .family(egui::FontFamily::Monospace),
+        );
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            if widgets::secondary_button(ui, "Open fonts folder", true).clicked() {
+                match std::fs::create_dir_all(&dir) {
+                    Ok(()) => {
+                        let _ = open::that(&dir);
+                    }
+                    Err(e) => {
+                        app.toast = Some(crate::app::Toast {
+                            level: LogLevel::Error,
+                            message: format!("Could not create fonts folder: {e}"),
+                            until: std::time::Instant::now()
+                                + std::time::Duration::from_secs(6),
+                        });
+                    }
+                }
+            }
+            ui.add_space(8.0);
+            if widgets::secondary_button(ui, "Reload fonts", true).clicked() {
+                app.font_report = crate::ui::fonts::reload(ui.ctx());
+                let n = app.font_report.custom.len();
+                app.toast = Some(crate::app::Toast {
+                    level: LogLevel::Info,
+                    message: if n > 0 {
+                        format!("Fonts reloaded — {n} custom font(s) active.")
+                    } else {
+                        "Fonts reloaded — no custom fonts found, using system fallbacks.".to_owned()
+                    },
+                    until: std::time::Instant::now() + std::time::Duration::from_secs(6),
+                });
+            }
+        });
+    } else {
+        ui.label(
+            RichText::new("Could not resolve an app-data folder for custom fonts.")
+                .color(p.warn)
+                .size(13.0),
+        );
+    }
+
+    ui.add_space(12.0);
+    let custom = if app.font_report.custom.is_empty() {
+        "Custom fonts: none (system fallbacks active)".to_owned()
+    } else {
+        format!("Custom fonts: {}", app.font_report.custom.join(", "))
+    };
+    ui.label(RichText::new(custom).color(p.text_soft).size(12.0));
+    ui.label(
+        RichText::new(format!(
+            "System fallbacks loaded: {}",
+            app.font_report.system.len()
+        ))
+        .color(p.muted)
+        .size(12.0),
+    );
+    if !app.font_report.failed.is_empty() {
+        ui.label(
+            RichText::new(format!(
+                "Could not read: {}",
+                app.font_report.failed.join(", ")
+            ))
+            .color(p.warn)
+            .size(12.0),
+        );
+    }
+
+    ui.add_space(12.0);
+    ui.label(
+        RichText::new("Preview: English · 日本語 · 中文 · 한국어 · العربية · ไทย · Ελληνικά · Кириллица")
+            .color(p.text)
+            .size(16.0),
+    );
+}
+
 fn theme_card(ui: &mut egui::Ui, app: &mut App, choice: theme::ThemeChoice) {
     let p = theme::pal(ui.ctx());
     let selected = app.theme_choice == choice;
     let size = Vec2::new(140.0, 96.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
-    if response.hovered() && !selected {
+    let ht = widgets::hover_t(ui, &response, response.hovered() && !selected);
+    let hover_fill = widgets::lerp_color(Color32::TRANSPARENT, p.hover, ht);
+    if hover_fill.a() > 0 {
         ui.painter()
-            .rect_filled(rect, CornerRadius::same(8), p.hover);
+            .rect_filled(rect, CornerRadius::same(8), hover_fill);
     }
     let stroke = if selected {
         Stroke::new(2.0_f32, p.accent)

@@ -19,6 +19,51 @@ pub enum BtnKind {
 
 const RADIUS: u8 = 6;
 
+/// Seconds for hover/active fades. Short enough to feel instant, long enough
+/// to read as a transition rather than a hard flip.
+pub const TRANSITION_SECS: f32 = 0.14;
+
+/// Linear RGBA mix between two colors (`t = 0` → `a`, `t = 1` → `b`).
+pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgba_unmultiplied(
+        mix(a.r(), b.r()),
+        mix(a.g(), b.g()),
+        mix(a.b(), b.b()),
+        mix(a.a(), b.a()),
+    )
+}
+
+/// 0 → 1 hover fade for a custom-painted widget. egui keeps requesting
+/// repaints while the value animates, so no timer is needed.
+pub fn hover_t(ui: &Ui, response: &Response, active: bool) -> f32 {
+    ui.ctx()
+        .animate_bool_with_time(response.id.with("hover"), active, TRANSITION_SECS)
+}
+
+/// 0 → 1 pressed fade; slightly faster than the hover fade so clicks feel snappy.
+pub fn press_t(ui: &Ui, response: &Response, active: bool) -> f32 {
+    ui.ctx()
+        .animate_bool_with_time(response.id.with("press"), active, 0.08)
+}
+
+/// The three looks a button eases between (rest → hover → pressed).
+#[derive(Clone, Copy)]
+struct BtnState {
+    fill: Color32,
+    border: Color32,
+    text: Color32,
+}
+
+fn lerp_state(a: BtnState, b: BtnState, t: f32) -> BtnState {
+    BtnState {
+        fill: lerp_color(a.fill, b.fill, t),
+        border: lerp_color(a.border, b.border, t),
+        text: lerp_color(a.text, b.text, t),
+    }
+}
+
 /// A 1 px horizontal rule across the available width.
 pub fn hairline(ui: &mut Ui) {
     let p = theme::pal(ui.ctx());
@@ -101,55 +146,88 @@ pub fn button(ui: &mut Ui, text: &str, enabled: bool, kind: BtnKind) -> Response
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    let hovered = enabled && response.hovered();
 
-    let (fill, stroke, text_color) = match kind {
-        BtnKind::Primary | BtnKind::PrimaryLarge => {
-            if !enabled {
-                (p.disabled_fill, Stroke::NONE, p.disabled_text)
-            } else if hovered {
-                (p.accent_hover, Stroke::NONE, p.accent_text)
-            } else {
-                (p.accent, Stroke::NONE, p.accent_text)
-            }
-        }
-        BtnKind::Secondary => {
-            if !enabled {
-                (p.disabled_fill, Stroke::NONE, p.disabled_text)
-            } else if hovered {
-                (p.hover, Stroke::new(1.0_f32, p.field_border), p.text)
-            } else {
-                (
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.0_f32, p.field_border),
-                    p.text,
-                )
-            }
-        }
-        BtnKind::Danger => {
-            if !enabled {
-                (p.disabled_fill, Stroke::NONE, p.disabled_text)
-            } else if hovered {
-                (p.danger_hover, Stroke::new(1.0_f32, p.danger_border), p.err)
-            } else {
-                (
-                    Color32::TRANSPARENT,
-                    Stroke::new(1.0_f32, p.danger_border),
-                    p.err,
-                )
-            }
-        }
+    if !enabled {
+        paint_disabled(ui, rect, text, font, p);
+        return response;
+    }
+
+    let hovered = response.hovered() || response.has_focus();
+    let pressed = response.is_pointer_button_down_on();
+
+    // Rest → hover → pressed, all eased instead of flipping instantly.
+    let (normal, over, down) = match kind {
+        BtnKind::Primary | BtnKind::PrimaryLarge => (
+            BtnState {
+                fill: p.accent,
+                border: p.accent,
+                text: p.accent_text,
+            },
+            BtnState {
+                fill: p.accent_hover,
+                border: p.accent_hover,
+                text: p.accent_text,
+            },
+            BtnState {
+                fill: p.accent,
+                border: p.accent,
+                text: p.accent_text,
+            },
+        ),
+        BtnKind::Secondary => (
+            BtnState {
+                fill: Color32::TRANSPARENT,
+                border: p.field_border,
+                text: p.text,
+            },
+            BtnState {
+                fill: p.hover,
+                border: p.field_border,
+                text: p.text,
+            },
+            BtnState {
+                fill: p.line,
+                border: p.field_border,
+                text: p.text,
+            },
+        ),
+        BtnKind::Danger => (
+            BtnState {
+                fill: Color32::TRANSPARENT,
+                border: p.danger_border,
+                text: p.err,
+            },
+            BtnState {
+                fill: p.danger_hover,
+                border: p.danger_border,
+                text: p.err,
+            },
+            BtnState {
+                fill: lerp_color(p.danger_hover, p.err, 0.18),
+                border: p.danger_border,
+                text: p.err,
+            },
+        ),
     };
+    let state = lerp_state(
+        lerp_state(normal, over, hover_t(ui, &response, hovered)),
+        down,
+        press_t(ui, &response, pressed),
+    );
 
     let radius = CornerRadius::same(RADIUS);
-    if fill != Color32::TRANSPARENT {
-        ui.painter().rect_filled(rect, radius, fill);
+    if state.fill.a() > 0 {
+        ui.painter().rect_filled(rect, radius, state.fill);
     }
-    if stroke != Stroke::NONE {
-        ui.painter()
-            .rect_stroke(rect, radius, stroke, StrokeKind::Inside);
+    if kind != BtnKind::Primary && kind != BtnKind::PrimaryLarge {
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0_f32, state.border),
+            StrokeKind::Inside,
+        );
     }
-    if response.has_focus() && enabled {
+    if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
             radius,
@@ -158,8 +236,16 @@ pub fn button(ui: &mut Ui, text: &str, enabled: bool, kind: BtnKind) -> Response
         );
     }
     ui.painter()
-        .text(rect.center(), Align2::CENTER_CENTER, text, font, text_color);
+        .text(rect.center(), Align2::CENTER_CENTER, text, font, state.text);
     response
+}
+
+/// Static look for disabled buttons (no hover, nothing to animate).
+fn paint_disabled(ui: &Ui, rect: Rect, text: &str, font: FontId, p: theme::Palette) {
+    let radius = CornerRadius::same(RADIUS);
+    ui.painter().rect_filled(rect, radius, p.disabled_fill);
+    ui.painter()
+        .text(rect.center(), Align2::CENTER_CENTER, text, font, p.disabled_text);
 }
 
 /// The one live-control: a wide rectangle with a smaller square inside it, so
@@ -184,40 +270,105 @@ pub fn stream_button(ui: &mut Ui, streaming: bool, enabled: bool) -> Response {
         Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    let hovered = enabled && response.hovered();
+
+    if !enabled {
+        // Static disabled look; the outlined variant keeps its border.
+        if streaming {
+            ui.painter().rect_stroke(
+                rect,
+                CornerRadius::same(6),
+                Stroke::new(1.0_f32, p.field_border),
+                StrokeKind::Inside,
+            );
+        } else {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(6), p.disabled_fill);
+        }
+        let square_rect = Rect::from_min_size(
+            egui::pos2(rect.left() + PAD, rect.center().y - SQUARE / 2.0),
+            Vec2::splat(SQUARE),
+        );
+        if streaming {
+            ui.painter().rect_stroke(
+                square_rect,
+                CornerRadius::same(3),
+                Stroke::new(2.0_f32, p.disabled_text),
+                StrokeKind::Inside,
+            );
+        } else {
+            ui.painter()
+                .rect_filled(square_rect, CornerRadius::same(3), p.disabled_text);
+        }
+        ui.painter().text(
+            egui::pos2(square_rect.right() + GAP, rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            font,
+            p.disabled_text,
+        );
+        return response;
+    }
+
+    let hovered = response.hovered() || response.has_focus();
+    let pressed = response.is_pointer_button_down_on();
 
     // Off = solid accent (record); on = outlined danger (stop).
-    let (fill, stroke, ink) = if streaming {
-        if !enabled {
-            (
-                Color32::TRANSPARENT,
-                Stroke::new(1.0_f32, p.field_border),
-                p.disabled_text,
-            )
-        } else if hovered {
-            (p.danger_hover, Stroke::new(1.0_f32, p.danger_border), p.err)
-        } else {
-            (
-                Color32::TRANSPARENT,
-                Stroke::new(1.0_f32, p.danger_border),
-                p.err,
-            )
-        }
-    } else if !enabled {
-        (p.disabled_fill, Stroke::NONE, p.disabled_text)
-    } else if hovered {
-        (p.accent_hover, Stroke::NONE, p.accent_text)
+    let (normal, over, down) = if streaming {
+        (
+            BtnState {
+                fill: Color32::TRANSPARENT,
+                border: p.danger_border,
+                text: p.err,
+            },
+            BtnState {
+                fill: p.danger_hover,
+                border: p.danger_border,
+                text: p.err,
+            },
+            BtnState {
+                fill: lerp_color(p.danger_hover, p.err, 0.18),
+                border: p.danger_border,
+                text: p.err,
+            },
+        )
     } else {
-        (p.accent, Stroke::NONE, p.accent_text)
+        (
+            BtnState {
+                fill: p.accent,
+                border: p.accent,
+                text: p.accent_text,
+            },
+            BtnState {
+                fill: p.accent_hover,
+                border: p.accent_hover,
+                text: p.accent_text,
+            },
+            BtnState {
+                fill: p.accent,
+                border: p.accent,
+                text: p.accent_text,
+            },
+        )
     };
+    let state = lerp_state(
+        lerp_state(normal, over, hover_t(ui, &response, hovered)),
+        down,
+        press_t(ui, &response, pressed),
+    );
+    let fill = state.fill;
+    let ink = state.text;
 
     let radius = CornerRadius::same(6);
-    if fill != Color32::TRANSPARENT {
+    if fill.a() > 0 {
         ui.painter().rect_filled(rect, radius, fill);
     }
-    if stroke != Stroke::NONE {
-        ui.painter()
-            .rect_stroke(rect, radius, stroke, StrokeKind::Inside);
+    if streaming {
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.0_f32, state.border),
+            StrokeKind::Inside,
+        );
     }
     if response.has_focus() && enabled {
         ui.painter().rect_stroke(
@@ -261,11 +412,12 @@ pub fn stream_button(ui: &mut Ui, streaming: bool, enabled: bool) -> Response {
 pub fn collapse_toggle(ui: &mut Ui, collapsed: bool, tooltip: &str) -> bool {
     let p = theme::pal(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, CornerRadius::same(4), p.nav_hover);
+    let ht = hover_t(ui, &response, response.hovered());
+    let bg = lerp_color(Color32::TRANSPARENT, p.nav_hover, ht);
+    if bg.a() > 0 {
+        ui.painter().rect_filled(rect, CornerRadius::same(4), bg);
     }
-    let ink = if response.hovered() { p.text } else { p.muted };
+    let ink = lerp_color(p.muted, p.text, ht);
     let c = rect.center();
     let s = 4.2;
     let points = if collapsed {
@@ -297,12 +449,11 @@ pub fn vertical_grip(ui: &mut Ui, value: &mut f32, min: f32, max: f32) -> Respon
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 12.0), Sense::drag());
     let hot = response.hovered() || response.dragged();
-
-    let (bar_width, color) = if hot {
-        (64.0, p.accent)
-    } else {
-        (44.0, p.line)
-    };
+    let t = ui
+        .ctx()
+        .animate_bool_with_time(response.id.with("hot"), hot, TRANSITION_SECS);
+    let bar_width = 44.0 + (64.0 - 44.0) * t;
+    let color = lerp_color(p.line, p.accent, t);
     ui.painter().rect_filled(
         Rect::from_center_size(rect.center(), Vec2::new(bar_width, 3.0)),
         CornerRadius::same(2),
@@ -396,10 +547,16 @@ pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool) -> Response {
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
     let radius = CornerRadius::same(RADIUS);
-    if active {
-        ui.painter().rect_filled(rect, radius, p.hover);
-    } else if response.hovered() {
-        ui.painter().rect_filled(rect, radius, p.nav_hover);
+    // Ease both the selection change and the hover highlight.
+    let at = ui
+        .ctx()
+        .animate_bool_with_time(response.id.with("active"), active, TRANSITION_SECS);
+    let ht = hover_t(ui, &response, response.hovered());
+    let idle_bg = lerp_color(Color32::TRANSPARENT, p.hover, at);
+    let over_bg = lerp_color(p.nav_hover, p.hover, at);
+    let bg = lerp_color(idle_bg, over_bg, ht);
+    if bg.a() > 0 {
+        ui.painter().rect_filled(rect, radius, bg);
     }
     if response.has_focus() {
         ui.painter().rect_stroke(
@@ -409,7 +566,7 @@ pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool) -> Response {
             StrokeKind::Inside,
         );
     }
-    let tint = if active { p.text } else { p.text_soft };
+    let tint = lerp_color(p.text_soft, p.text, at.max(ht));
     // With no label (the minimized rail) the icon is centered; otherwise it
     // sits at the left with the label beside it.
     let icon_x = if text.is_empty() {
@@ -487,4 +644,37 @@ pub fn eyebrow(ui: &mut Ui, text: &str) {
             .size(11.0)
             .strong(),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lerp_color_endpoints_and_midpoint() {
+        // Opaque colors mix channel-by-channel exactly. (egui Color32 stores
+        // premultiplied sRGB, so only opaque colors have exact channel reads.)
+        let a = Color32::from_rgb(0, 100, 200);
+        let b = Color32::from_rgb(200, 0, 100);
+        assert_eq!(lerp_color(a, b, 0.0), a);
+        assert_eq!(lerp_color(a, b, 1.0), b);
+        assert_eq!(lerp_color(a, b, 0.5), Color32::from_rgb(100, 50, 150));
+        // Out-of-range t is clamped, never wraps the channels.
+        assert_eq!(lerp_color(a, b, 2.0), b);
+    }
+
+    #[test]
+    fn transparent_fades_in() {
+        // Exact endpoints, exact alpha ramp. (Channel reads of half-alpha
+        // colors are premultiplied by egui, so only alpha is asserted here.)
+        assert_eq!(
+            lerp_color(Color32::TRANSPARENT, Color32::WHITE, 0.0),
+            Color32::TRANSPARENT
+        );
+        assert_eq!(
+            lerp_color(Color32::TRANSPARENT, Color32::WHITE, 1.0),
+            Color32::WHITE
+        );
+        assert_eq!(lerp_color(Color32::TRANSPARENT, Color32::WHITE, 0.5).a(), 128);
+    }
 }

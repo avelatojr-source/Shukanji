@@ -2,10 +2,11 @@
 //!
 //! Colors come from `tokens-themes.json`. Flat look: hairline strokes, 6 px
 //! radii, no gradients, glows or shadows, one pink accent.
+//!
+//! Font installation lives in [`super::fonts`] (bundled faces plus user and
+//! system fallbacks so chat can render any script).
 
-use std::sync::Arc;
-
-use egui::{Color32, FontDefinitions, FontFamily};
+use egui::{Color32, FontFamily};
 
 const fn rgb(hex: u32) -> Color32 {
     Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
@@ -201,8 +202,9 @@ pub fn wordmark_family() -> FontFamily {
 }
 
 /// Install fonts, register both theme visuals and set spacing. Call once.
-pub fn apply(ctx: &egui::Context) {
-    install_fonts(ctx);
+/// Returns the font scan report so the settings page can show it.
+pub fn apply(ctx: &egui::Context) -> super::fonts::FontReport {
+    let report = super::fonts::install(ctx);
     ctx.set_visuals_of(egui::Theme::Dark, visuals(DARK, egui::Visuals::dark()));
     ctx.set_visuals_of(egui::Theme::Light, visuals(LIGHT, egui::Visuals::light()));
     ctx.all_styles_mut(|style| {
@@ -215,6 +217,7 @@ pub fn apply(ctx: &egui::Context) {
         style.spacing.scroll.bar_outer_margin = 0.0;
         style.spacing.scroll.floating = false;
     });
+    report
 }
 
 fn visuals(p: Palette, mut v: egui::Visuals) -> egui::Visuals {
@@ -245,62 +248,4 @@ fn visuals(p: Palette, mut v: egui::Visuals) -> egui::Visuals {
         w.corner_radius = egui::CornerRadius::same(6);
     }
     v
-}
-
-fn install_fonts(ctx: &egui::Context) {
-    let mut fonts = FontDefinitions::default();
-    fonts.font_data.insert(
-        "inter".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../assets/fonts/Inter.ttf"
-        ))),
-    );
-    fonts.font_data.insert(
-        "jetbrains".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../assets/fonts/JetBrainsMono.ttf"
-        ))),
-    );
-    // Subset of Zen Antique covering printable ASCII only. The full face is
-    // 5.4 MB, almost all of it CJK outlines this app never draws (the family is
-    // used for the "ShuKanji" wordmark and nothing else), so shipping it whole
-    // would add ~5.5 MB to the binary for nothing. See assets/fonts/README.md.
-    fonts.font_data.insert(
-        "zen".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../assets/fonts/ZenAntique-Wordmark.ttf"
-        ))),
-    );
-    // Monochrome emoji font (egui can't render colour emoji glyphs).
-    fonts.font_data.insert(
-        "notoemoji".to_owned(),
-        Arc::new(egui::FontData::from_static(include_bytes!(
-            "../../assets/fonts/NotoEmoji.ttf"
-        ))),
-    );
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .insert(0, "inter".to_owned());
-    // Emoji as the last fallback so any emoji code point Inter lacks resolves.
-    fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default()
-        .push("notoemoji".to_owned());
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .insert(0, "jetbrains".to_owned());
-    fonts
-        .families
-        .entry(FontFamily::Monospace)
-        .or_default()
-        .push("notoemoji".to_owned());
-    fonts
-        .families
-        .insert(FontFamily::Name("wordmark".into()), vec!["zen".to_owned()]);
-    ctx.set_fonts(fonts);
 }
