@@ -3,7 +3,10 @@
 //! A click first captures the *old* theme without changing it. When the
 //! screenshot arrives, the new theme is applied and the old frame is drawn on
 //! top with an expanding circular hole. The reveal mesh is rebuilt each frame
-//! (128 segments), so no shader or per-pixel CPU work is required.
+//! from 128 segments plus the four window corners, so the old frame covers the
+//! window exactly until the circle reaches each edge — no premature color
+//! bleed at the borders, and no colored ring. No shader or per-pixel CPU work
+//! is required.
 
 use std::time::{Duration, Instant};
 
@@ -23,6 +26,9 @@ pub struct ThemeTransition {
     queued_choice: Option<ThemeChoice>,
     old_frame: Option<TextureHandle>,
     started_at: Option<Instant>,
+    /// Segment angles for the current window, including its four corners.
+    /// Computed once per reveal so `paint` does no trigonometry or sorting.
+    angles: Vec<f32>,
 }
 
 impl ThemeTransition {
@@ -82,6 +88,8 @@ impl ThemeTransition {
                 image.as_ref().clone(),
                 egui::TextureOptions::LINEAR,
             ));
+            let rect = ctx.screen_rect();
+            self.angles = boundary_angles(rect, rect.center());
             self.started_at = Some(Instant::now());
         }
 
@@ -91,6 +99,7 @@ impl ThemeTransition {
         if finished {
             self.old_frame = None;
             self.started_at = None;
+            self.angles.clear();
             if let Some(choice) = self.queued_choice.take() {
                 self.start_capture(ctx, choice);
             }
@@ -109,20 +118,20 @@ impl ThemeTransition {
         let rect = ctx.screen_rect();
         let center = rect.center();
         let radius = max_radius(rect, center) * progress;
-        let mesh = reveal_mesh(rect, center, radius, texture.id());
+        let fallback_angles;
+        let angles = if self.angles.is_empty() {
+            fallback_angles = boundary_angles(rect, center);
+            &fallback_angles
+        } else {
+            &self.angles
+        };
+        let mesh = reveal_mesh(rect, center, radius, texture.id(), angles);
 
         let painter = ctx.layer_painter(egui::LayerId::new(
             egui::Order::Tooltip,
             egui::Id::new("shukanji.theme_reveal"),
         ));
         painter.add(egui::Shape::mesh(mesh));
-        if radius > 1.0 && t < 0.98 {
-            // A short-lived accent edge makes the circle readable without
-            // turning it into a permanent ring.
-            let accent = super::theme::pal(ctx).accent;
-            let edge = super::widgets::with_alpha(accent, (1.0 - t) * 0.45);
-            painter.circle_stroke(center, radius, egui::Stroke::new(1.5_f32, edge));
-        }
         ctx.request_repaint();
     }
 }
@@ -176,17 +185,47 @@ fn uv(rect: Rect, point: Pos2) -> Pos2 {
     )
 }
 
+/// Evenly spaced ray angles **plus the exact corner angles**. Without the
+/// corners the outer boundary becomes an inscribed polygon that clips the
+/// window corners, so the new theme shows through there before the circle
+/// arrives. With them, every outer segment lies exactly on a window edge.
+fn boundary_angles(rect: Rect, center: Pos2) -> Vec<f32> {
+    use std::f32::consts::TAU;
+
+    let mut angles = Vec::with_capacity(SEGMENTS + 4);
+    for segment in 0..SEGMENTS {
+        angles.push(segment as f32 / SEGMENTS as f32 * TAU);
+    }
+    for corner in [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ] {
+        let delta = corner - center;
+        angles.push(delta.y.atan2(delta.x).rem_euclid(TAU));
+    }
+    angles.sort_by(f32::total_cmp);
+    angles.dedup_by(|a, b| (*a - *b).abs() < 1e-4);
+    angles
+}
+
 /// Textured geometry covering `rect` except for a circular hole around
 /// `center`. Each segment clamps its inner point to the rectangle boundary so
 /// the final frames cannot produce inverted triangles.
-fn reveal_mesh(rect: Rect, center: Pos2, radius: f32, texture_id: TextureId) -> Mesh {
+fn reveal_mesh(
+    rect: Rect,
+    center: Pos2,
+    radius: f32,
+    texture_id: TextureId,
+    angles: &[f32],
+) -> Mesh {
     let mut mesh = Mesh::with_texture(texture_id);
-    mesh.vertices.reserve(SEGMENTS * 4);
-    mesh.indices.reserve(SEGMENTS * 6);
+    mesh.vertices.reserve(angles.len() * 4);
+    mesh.indices.reserve(angles.len() * 6);
 
-    for segment in 0..SEGMENTS {
-        let a0 = segment as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
-        let a1 = (segment + 1) as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+    for (segment, &a0) in angles.iter().enumerate() {
+        let a1 = angles[(segment + 1) % angles.len()];
         let outer0 = ray_to_rect(center, Vec2::new(a0.cos(), a0.sin()), rect);
         let outer1 = ray_to_rect(center, Vec2::new(a1.cos(), a1.sin()), rect);
         let inner0 = point_toward(center, outer0, radius);
@@ -232,11 +271,70 @@ mod tests {
     fn reveal_mesh_is_valid_at_start_middle_and_end() {
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
         let center = rect.center();
+        let angles = boundary_angles(rect, center);
         for radius in [0.0, 100.0, max_radius(rect, center)] {
-            let mesh = reveal_mesh(rect, center, radius, TextureId::Managed(1));
+            let mesh = reveal_mesh(rect, center, radius, TextureId::Managed(1), &angles);
             assert!(mesh.is_valid());
-            assert_eq!(mesh.vertices.len(), SEGMENTS * 4);
-            assert_eq!(mesh.indices.len(), SEGMENTS * 6);
+            assert_eq!(mesh.vertices.len(), angles.len() * 4);
+            assert_eq!(mesh.indices.len(), angles.len() * 6);
+        }
+    }
+
+    /// Total area of the triangles in a mesh.
+    fn mesh_area(mesh: &Mesh) -> f32 {
+        mesh.indices
+            .chunks_exact(3)
+            .map(|tri| {
+                let a = mesh.vertices[tri[0] as usize].pos;
+                let b = mesh.vertices[tri[1] as usize].pos;
+                let c = mesh.vertices[tri[2] as usize].pos;
+                ((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)).abs() * 0.5
+            })
+            .sum()
+    }
+
+    #[test]
+    fn start_covers_the_whole_window_and_end_covers_nothing() {
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 800.0));
+        let center = rect.center();
+        let angles = boundary_angles(rect, center);
+        let full = rect.width() * rect.height();
+
+        let start = reveal_mesh(rect, center, 0.0, TextureId::Managed(1), &angles);
+        let start_area = mesh_area(&start);
+        assert!(
+            (start_area - full).abs() < full * 0.001,
+            "old frame must cover the whole window at the start, got {start_area} of {full}"
+        );
+
+        let end = reveal_mesh(
+            rect,
+            center,
+            max_radius(rect, center),
+            TextureId::Managed(1),
+            &angles,
+        );
+        assert!(mesh_area(&end) < 1.0, "nothing should remain at the end");
+    }
+
+    #[test]
+    fn corners_are_exact_vertices() {
+        let rect = Rect::from_min_size(pos2(10.0, 20.0), Vec2::new(200.0, 100.0));
+        let center = rect.center();
+        let angles = boundary_angles(rect, center);
+        let mesh = reveal_mesh(rect, center, 0.0, TextureId::Managed(1), &angles);
+        for corner in [
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+        ] {
+            assert!(
+                mesh.vertices
+                    .iter()
+                    .any(|v| v.pos.distance(corner) < 0.01),
+                "corner {corner:?} missing from the mesh"
+            );
         }
     }
 }

@@ -47,9 +47,11 @@ project. The original `Desktop\Shukanji` checkout is untouched.
   the previous frame, applies the new theme, and reveals it through a circular
   hole expanding from the center of the window over 460 ms with smoothstep
   easing. The old frame is drawn as a textured 128-segment mesh (no shaders or
-  per-pixel CPU work) with a thin accent ring at the edge. Works from the
-  Appearance theme cards and the header toggle; rapid clicks are queued and
-  replayed after the current reveal.
+  per-pixel CPU work). Works from the Appearance theme cards and the header
+  toggle; rapid clicks are queued and replayed after the current reveal.
+  The accent ring was removed, and the mesh now includes the exact window
+  corners so no new-theme color bleeds through the edges before the circle
+  arrives. Segment angles are computed once per reveal, not per frame.
 - **Ctrl+T** now switches dark/light theme (also listed in
   Settings → Shortcuts).
 - **Sidebar minimizer is now fully animated** (180 ms): the width slides
@@ -135,8 +137,9 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 ## Verification
 
 - `cargo check --all-targets` — clean, no warnings
-- `cargo test` — 125 passed, 0 failed, 1 ignored (includes new reveal-mesh,
-  smoothstep, script-detection, family-order and image-eviction tests)
+- `cargo test` — 127 passed, 0 failed, 1 ignored (includes new reveal-mesh
+  coverage/corner, smoothstep, script-detection, family-order and
+  image-eviction tests)
 - `cargo build --release` — produces the updated `shukanji.exe` (also copied to
   the folder root)
 - RAM probe: start-up 156 MB working set / 98 MB private (was 358 / 312 MB);
