@@ -156,6 +156,8 @@ pub struct App {
     // shell / theme / navigation
     pub page: Page,
     pub theme_choice: theme::ThemeChoice,
+    /// Old-frame texture and capture state for the circular theme reveal.
+    theme_transition: crate::ui::theme_transition::ThemeTransition,
     /// Result of the last font scan (custom + system fallbacks), shown in
     /// Settings → Chat fonts. Filled in by the background font loader.
     pub font_report: crate::ui::fonts::FontReport,
@@ -260,6 +262,7 @@ impl App {
             apply_request_id: 0,
             page: Page::Setup,
             theme_choice: theme::ThemeChoice::System,
+            theme_transition: crate::ui::theme_transition::ThemeTransition::default(),
             font_report: crate::ui::fonts::FontReport {
                 custom_dir: crate::ui::fonts::custom_font_dir(),
                 ..crate::ui::fonts::FontReport::default()
@@ -289,6 +292,15 @@ impl App {
             });
         }
         app
+    }
+
+    /// Change theme with a center-out circular reveal. The capture is handled
+    /// by `theme_transition`, so callers never need to delay the theme itself.
+    pub fn change_theme(&mut self, ctx: &egui::Context, choice: theme::ThemeChoice) {
+        if choice == self.theme_choice {
+            return;
+        }
+        self.theme_transition.request(ctx, choice);
     }
 
     pub fn toast(&mut self, level: LogLevel, message: impl Into<String>) {
@@ -823,6 +835,8 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Apply a pending theme only after its old-theme screenshot arrives.
+        self.theme_transition.update(ctx, &mut self.theme_choice);
         theme::set_choice(ctx, self.theme_choice);
         ctx.set_theme(self.theme_choice.egui_pref());
         // The mascot only exists in the Tebby theme, and only when the sidebar
@@ -850,9 +864,10 @@ impl eframe::App for App {
                 ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(60.0, 60.0)));
             }
         }
-        let (toggle_sidebar, escape) = ctx.input(|i| {
+        let (toggle_sidebar, toggle_theme, escape) = ctx.input(|i| {
             (
                 i.modifiers.command && i.key_pressed(egui::Key::B),
+                i.modifiers.command && i.key_pressed(egui::Key::T),
                 i.key_pressed(egui::Key::Escape),
             )
         });
@@ -860,6 +875,21 @@ impl eframe::App for App {
             self.sidebar_minimized = !self.sidebar_minimized;
             // The user has expressed a preference; stop auto-collapsing.
             self.sidebar_user_set = true;
+        }
+        if toggle_theme {
+            let dark = match self.theme_choice {
+                theme::ThemeChoice::Dark => true,
+                theme::ThemeChoice::Light | theme::ThemeChoice::Tebby => false,
+                theme::ThemeChoice::System => ctx.theme() == egui::Theme::Dark,
+            };
+            self.change_theme(
+                ctx,
+                if dark {
+                    theme::ThemeChoice::Light
+                } else {
+                    theme::ThemeChoice::Dark
+                },
+            );
         }
         if escape {
             self.confirm = None;
@@ -884,6 +914,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(toast.until.saturating_duration_since(Instant::now()));
         }
         crate::ui::panels::render(self, ctx);
+        self.theme_transition.paint(ctx);
 
         #[cfg(windows)]
         if let Some(fx) = &mut self.window_fx {

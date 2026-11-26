@@ -5,15 +5,27 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 
 ## What changed
 
-### 0. Smooth minimizer animations + performance pass (latest)
+### 0. Smooth window animations, circular theme reveal + performance pass (latest)
 
-- **Real native window animations (Windows):** launch fades in over 240 ms,
-  the title-bar X / Alt+F4 fades out over 180 ms before shutdown, and the
-  actual title-bar minimize button fades over 180 ms before entering the real
-  minimized state. Restoring from the taskbar fades back in over 160 ms. These
-  are Win32 `AnimateWindow` effects on the real app window, separate from the
-  sidebar animation below. Close uses `DestroyWindow` after the fade so hidden
-  windows still shut down reliably; normal non-animated fallbacks remain.
+- **Real native window animations (Windows):** launch fades in over 240 ms and
+  the title-bar X / Alt+F4 fades out over 180 ms before shutdown. The title-bar
+  minimize button now fades through a 200 ms `SetTimer` opacity ramp with
+  smoothstep easing, and only then enters the real minimized state; restoring
+  from the taskbar fades back in over 170 ms. This replaces the earlier
+  `AnimateWindow` minimize/restore path, whose hide + show sequence caused a
+  visible snap. Restoring during the fade cancels it instead of re-minimizing,
+  and un-maximizing does not trigger a restore fade. Close still uses
+  `DestroyWindow` after the fade so hidden windows shut down reliably; normal
+  non-animated fallbacks remain.
+- **Animated theme change (center-out circle):** changing the theme captures
+  the previous frame, applies the new theme, and reveals it through a circular
+  hole expanding from the center of the window over 460 ms with smoothstep
+  easing. The old frame is drawn as a textured 128-segment mesh (no shaders or
+  per-pixel CPU work) with a thin accent ring at the edge. Works from the
+  Appearance theme cards and the header toggle; rapid clicks are queued and
+  replayed after the current reveal.
+- **Ctrl+T** now switches dark/light theme (also listed in
+  Settings → Shortcuts).
 - **Sidebar minimizer is now fully animated** (180 ms): the width slides
   between 220 px and the 68 px rail, the wordmark/display name fade, nav icons
   slide from their left slot to the rail center, labels fade out, and the group
@@ -82,10 +94,11 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 | `app/src/ui/fonts.rs` | **New** — font discovery, fallback chain, scan report, tests; bundled fast path + background extended loader |
 | `app/src/ui/theme.rs` | Font install moved to `fonts.rs` (bundled fast path at start-up) |
 | `app/src/ui/mod.rs` | Register `fonts` module |
-| `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling |
+| `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling; theme transition state + `change_theme`, Ctrl+T shortcut |
 | `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp/alpha helpers + tests |
-| `app/src/ui/panels.rs` | Animated chat tabs + theme cards; Chat fonts settings section; animated sidebar + Go Live bar minimizers |
-| `app/src/platform/window_fx.rs` | **New** — Win32 native open/close/minimize/restore fades + tests |
+| `app/src/ui/panels.rs` | Animated chat tabs + theme cards; Chat fonts settings section; animated sidebar + Go Live bar minimizers; theme cards/toggle route through the reveal |
+| `app/src/ui/theme_transition.rs` | **New** — screenshot capture, expanding circular reveal mesh, queued theme changes + tests |
+| `app/src/platform/window_fx.rs` | **New** — Win32 native open/close fades, timer-driven minimize/restore ramps + tests |
 | `app/src/platform/mod.rs` | Register the Windows-only native effects module |
 | `app/src/main.rs` | Start hidden on Windows for the launch fade |
 | `app/Cargo.toml`, `app/Cargo.lock` | Add `raw-window-handle` and Windows API dependencies |
@@ -94,10 +107,17 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 
 ## Verification
 
-- `cargo check --all-targets` — clean
-- `cargo test` — all tests pass (including new font-chain and color-lerp tests)
+- `cargo check --all-targets` — clean, no warnings
+- `cargo test` — 121 passed, 0 failed, 1 ignored (includes new reveal-mesh,
+  smoothstep and window-command tests)
 - `cargo build --release` — produces the updated `shukanji.exe` in
   `app\target\release\`
+- Live Windows probe: minimize alpha steps 247 → 212 → 167 → 62 → 22 → 0
+  (25 ms samples), restore climbs back to opaque, close exits the process
+- Live Windows probe: restoring 60 ms into the minimize fade leaves the window
+  restored and visible
+- Live Windows probe: Ctrl+T / theme card capture shows a small center circle
+  growing to the full window, ending on the new theme
 
 ## Build / run
 

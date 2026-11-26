@@ -326,11 +326,12 @@ fn theme_toggle(ui: &mut egui::Ui, app: &mut App) {
     let icon_rect = Rect::from_center_size(rect.center(), Vec2::splat(18.0));
     widgets::paint_icon(ui, icon, icon_rect, p.text_soft);
     if response.on_hover_text(tip).clicked() {
-        app.theme_choice = if dark {
+        let choice = if dark {
             theme::ThemeChoice::Light
         } else {
             theme::ThemeChoice::Dark
         };
+        app.change_theme(ui.ctx(), choice);
     }
 }
 
@@ -1500,7 +1501,9 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
 
             widgets::section(ui, "Shortcuts", |ui| {
                 ui.label(
-                    RichText::new("Ctrl+B  minimize the sidebar\nEsc  close a dialog")
+                    RichText::new(
+                        "Ctrl+B  minimize the sidebar\nCtrl+T  switch dark / light theme\nEsc  close a dialog",
+                    )
                         .color(p.muted)
                         .size(13.0),
                 );
@@ -1644,7 +1647,7 @@ fn theme_card(ui: &mut egui::Ui, app: &mut App, choice: theme::ThemeChoice) {
     );
 
     if response.clicked() {
-        app.theme_choice = choice;
+        app.change_theme(ui.ctx(), choice);
     }
 }
 

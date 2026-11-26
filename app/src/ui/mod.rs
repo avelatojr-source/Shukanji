@@ -6,4 +6,5 @@ pub mod image_cache;
 pub mod panels;
 pub mod tebby;
 pub mod theme;
+pub mod theme_transition;
 pub mod widgets;
