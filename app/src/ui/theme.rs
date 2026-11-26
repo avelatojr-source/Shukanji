@@ -202,8 +202,9 @@ pub fn wordmark_family() -> FontFamily {
 }
 
 /// Install the bundled fonts, register both theme visuals and set spacing.
-/// Call once. Custom + system fonts are loaded afterwards in the background
-/// (see [`super::fonts::spawn_extended`]) so start-up never blocks on disk.
+/// Call once. User + base system fonts arrive from the background
+/// [`super::fonts::FontManager`], and large script faces load on demand, so
+/// start-up never blocks on disk and never keeps unused CJK fonts resident.
 pub fn apply(ctx: &egui::Context) {
     super::fonts::install_bundled(ctx);
     ctx.set_visuals_of(egui::Theme::Dark, visuals(DARK, egui::Visuals::dark()));

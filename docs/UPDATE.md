@@ -5,7 +5,33 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 
 ## What changed
 
-### 0. Smooth window animations, circular theme reveal + performance pass (latest)
+### Final pass — heavy RAM optimization + cleanup
+
+- **Lazy script fonts (biggest win):** start-up now installs only the bundled
+  faces plus the small Segoe UI / Segoe UI Symbol bases. The large Japanese,
+  Chinese, Korean, Thai, Indic and colour-emoji faces load on a background
+  thread the first time chat text actually uses that script, instead of all
+  ~106 MB being parsed at launch. Redundant Arial/Tahoma/SimSun/JhengHei faces
+  were removed (Segoe UI + Microsoft YaHei cover them).
+  **Start-up private memory drops from ~312 MB to ~98 MB (−69%), working set
+  from ~358 MB to ~156 MB.** Opening Settings → Chat fonts deliberately loads
+  the preview's scripts (~169 MB private), and multi-script chat still renders
+  correctly — verified Japanese, Chinese, Korean, Arabic, Thai, Greek and
+  Cyrillic in the preview.
+- **Bounded image memory:** the avatar/gift/emote cache now keeps 512 entries
+  (was 4096) and calls `egui::Context::forget_image` on eviction, so decoded
+  pixels and GPU textures are released instead of only the URL mapping. The
+  download worker pool was reduced from 4 threads to 2. The on-disk cache cap
+  (256 MB, oldest-first) is unchanged.
+- Chat (300), gifts (100), activity (100) and log (200) lines were already
+  capped; the font manager also coalesces repeat requests and never re-reads a
+  font file it has already tried.
+- **Folder finalized:** the new release exe sits at the folder root, the
+  regenerable `app/target` build output (~9.4 GB) and the redundant
+  `ShuKanji-Source.zip` were removed. Source, the required `live-rs` path
+  dependency, docs and scripts remain.
+
+### 0. Smooth window animations, circular theme reveal + performance pass
 
 - **Real native window animations (Windows):** launch fades in over 240 ms and
   the title-bar X / Alt+F4 fades out over 180 ms before shutdown. The title-bar
@@ -91,8 +117,9 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 
 | File | Change |
 | --- | --- |
-| `app/src/ui/fonts.rs` | **New** — font discovery, fallback chain, scan report, tests; bundled fast path + background extended loader |
+| `app/src/ui/fonts.rs` | **New** — `FontManager` worker, bundled fast path, base + on-demand script fonts, scan report, tests |
 | `app/src/ui/theme.rs` | Font install moved to `fonts.rs` (bundled fast path at start-up) |
+| `app/src/ui/image_cache.rs` | 512-entry cap, `forget_image` eviction, 2 download workers, eviction test |
 | `app/src/ui/mod.rs` | Register `fonts` module |
 | `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling; theme transition state + `change_theme`, Ctrl+T shortcut |
 | `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp/alpha helpers + tests |
@@ -108,16 +135,19 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 ## Verification
 
 - `cargo check --all-targets` — clean, no warnings
-- `cargo test` — 121 passed, 0 failed, 1 ignored (includes new reveal-mesh,
-  smoothstep and window-command tests)
-- `cargo build --release` — produces the updated `shukanji.exe` in
-  `app\target\release\`
-- Live Windows probe: minimize alpha steps 247 → 212 → 167 → 62 → 22 → 0
-  (25 ms samples), restore climbs back to opaque, close exits the process
-- Live Windows probe: restoring 60 ms into the minimize fade leaves the window
-  restored and visible
+- `cargo test` — 125 passed, 0 failed, 1 ignored (includes new reveal-mesh,
+  smoothstep, script-detection, family-order and image-eviction tests)
+- `cargo build --release` — produces the updated `shukanji.exe` (also copied to
+  the folder root)
+- RAM probe: start-up 156 MB working set / 98 MB private (was 358 / 312 MB);
+  230 / 169 MB after loading the Settings font preview
+- Live Windows probe: minimize alpha steps down to 0, restore climbs back to
+  opaque, close exits the process; interrupted transitions end in the correct
+  state
 - Live Windows probe: Ctrl+T / theme card capture shows a small center circle
   growing to the full window, ending on the new theme
+- Live Windows probe: Settings → Chat fonts preview renders Japanese, Chinese,
+  Korean, Arabic, Thai, Greek and Cyrillic after the on-demand load
 
 ## Build / run
 

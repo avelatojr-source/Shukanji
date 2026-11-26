@@ -16,11 +16,12 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 /// Number of parallel download workers.
-const WORKERS: usize = 4;
+const WORKERS: usize = 2;
 /// How many loaded URLs to keep mapped in memory. A long stream can show
-/// thousands of distinct avatars; without a ceiling the map (and the URIs egui
-/// holds) would grow for the whole broadcast.
-const MAX_ENTRIES: usize = 4096;
+/// thousands of distinct avatars; without a ceiling the decoded textures would
+/// grow for the whole broadcast. 512 is well above the 300 chat lines on
+/// screen, and evicted images are re-fetched from the disk cache if needed.
+const MAX_ENTRIES: usize = 512;
 /// Ceiling for the on-disk cache. Oldest files are pruned first.
 const MAX_DISK_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -70,11 +71,15 @@ impl ImageCache {
     }
 
     /// Remember a result and keep the map bounded, evicting oldest-first.
-    fn remember(&mut self, url: String, uri: Option<String>) {
+    /// Evicted images are also forgotten by egui so their decoded pixels and
+    /// GPU texture are actually released, not just removed from our map.
+    fn remember(&mut self, ctx: &egui::Context, url: String, uri: Option<String>) {
         if self.entries.insert(url.clone(), uri).is_none() {
             self.order.push_back(url);
         }
-        cap_entries(&mut self.entries, &mut self.order, MAX_ENTRIES);
+        for evicted in cap_entries(&mut self.entries, &mut self.order, MAX_ENTRIES) {
+            ctx.forget_image(&evicted);
+        }
     }
 
     /// The `bytes://` URI for a URL, or `None` while it is still loading.
@@ -101,10 +106,10 @@ impl ImageCache {
                     let ext = sniff_ext(&bytes);
                     let uri = format!("bytes://tk/{}.{ext}", hash_url(&url));
                     ctx.include_bytes(uri.clone(), bytes);
-                    self.remember(url, Some(uri));
+                    self.remember(ctx, url, Some(uri));
                 }
                 _ => {
-                    self.remember(url, None);
+                    self.remember(ctx, url, None);
                 }
             }
             ctx.request_repaint();
@@ -177,18 +182,22 @@ fn fetch(
     Ok(bytes)
 }
 
-/// Drop the oldest keys until at most `max` remain. Evicted URLs simply get
-/// re-fetched (a disk hit) if they are ever needed again.
+/// Drop the oldest keys until at most `max` remain. Returns the URIs that were
+/// evicted so the caller can release their egui images/textures.
 fn cap_entries(
     entries: &mut HashMap<String, Option<String>>,
     order: &mut VecDeque<String>,
     max: usize,
-) {
+) -> Vec<String> {
+    let mut evicted = Vec::new();
     while order.len() > max {
-        if let Some(oldest) = order.pop_front() {
-            entries.remove(&oldest);
+        if let Some(oldest) = order.pop_front()
+            && let Some(Some(uri)) = entries.remove(&oldest)
+        {
+            evicted.push(uri);
         }
     }
+    evicted
 }
 
 /// Delete the oldest cached files until the directory fits inside `max_bytes`.
@@ -298,6 +307,23 @@ mod tests {
         assert!(entries.contains_key("https://cdn/8.png"));
         assert!(entries.contains_key("https://cdn/7.png"));
         assert!(!entries.contains_key("https://cdn/0.png"));
+    }
+
+    #[test]
+    fn eviction_reports_uris_for_release() {
+        let mut entries: HashMap<String, Option<String>> = HashMap::new();
+        let mut order: VecDeque<String> = VecDeque::new();
+        for i in 0..5 {
+            let url = format!("https://cdn/{i}.png");
+            entries.insert(url.clone(), Some(format!("bytes://tk/{i}.png")));
+            order.push_back(url);
+        }
+        let evicted = cap_entries(&mut entries, &mut order, 2);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(evicted.len(), 3);
+        assert!(evicted.contains(&"bytes://tk/0.png".to_string()));
+        assert!(evicted.contains(&"bytes://tk/2.png".to_string()));
+        assert!(!evicted.contains(&"bytes://tk/4.png".to_string()));
     }
 
     #[test]

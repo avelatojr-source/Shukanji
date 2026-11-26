@@ -1514,11 +1514,14 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
 
 /// Settings → Chat fonts: custom font folder, reload, scan report and a live
 /// multi-script preview so coverage problems are visible immediately.
+const FONT_PREVIEW: &str =
+    "Preview: English · 日本語 · 中文 · 한국어 · العربية · ไทย · Ελληνικά · Кириллица";
+
 fn chat_fonts_section(ui: &mut egui::Ui, app: &mut App) {
     let p = theme::pal(ui.ctx());
     ui.label(
         RichText::new(
-            "Viewer comments can use any language. ShuKanji falls back to your Windows fonts for scripts the built-in face lacks (Japanese, Chinese, Korean, Arabic, Thai and more), and you can add your own fonts below.",
+            "Viewer comments can use any language. ShuKanji loads the matching Windows fallback the first time a script appears (Japanese, Chinese, Korean, Arabic, Thai and more), and you can add your own fonts below.",
         )
         .color(p.muted)
         .size(13.0),
@@ -1557,17 +1560,8 @@ fn chat_fonts_section(ui: &mut egui::Ui, app: &mut App) {
             }
             ui.add_space(8.0);
             if widgets::secondary_button(ui, "Reload fonts", true).clicked() {
-                app.font_report = crate::ui::fonts::reload(ui.ctx());
-                let n = app.font_report.custom.len();
-                app.toast = Some(crate::app::Toast {
-                    level: LogLevel::Info,
-                    message: if n > 0 {
-                        format!("Fonts reloaded — {n} custom font(s) active.")
-                    } else {
-                        "Fonts reloaded — no custom fonts found, using system fallbacks.".to_owned()
-                    },
-                    until: std::time::Instant::now() + std::time::Duration::from_secs(6),
-                });
+                app.fonts.reload();
+                app.toast(LogLevel::Info, "Rescanning fonts…");
             }
         });
     } else {
@@ -1587,7 +1581,7 @@ fn chat_fonts_section(ui: &mut egui::Ui, app: &mut App) {
     ui.label(RichText::new(custom).color(p.text_soft).size(12.0));
     ui.label(
         RichText::new(format!(
-            "System fallbacks loaded: {}",
+            "System fallbacks active: {} (other scripts load on demand)",
             app.font_report.system.len()
         ))
         .color(p.muted)
@@ -1605,11 +1599,10 @@ fn chat_fonts_section(ui: &mut egui::Ui, app: &mut App) {
     }
 
     ui.add_space(12.0);
-    ui.label(
-        RichText::new("Preview: English · 日本語 · 中文 · 한국어 · العربية · ไทย · Ελληνικά · Кириллица")
-            .color(p.text)
-            .size(16.0),
-    );
+    // Opening this section is an explicit request to test coverage, so pull
+    // every script the preview uses (they stay installed for the session).
+    app.fonts.ensure_text(FONT_PREVIEW);
+    ui.label(RichText::new(FONT_PREVIEW).color(p.text).size(16.0));
 }
 
 fn theme_card(ui: &mut egui::Ui, app: &mut App, choice: theme::ThemeChoice) {

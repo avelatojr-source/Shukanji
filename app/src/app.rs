@@ -9,7 +9,7 @@ use crate::domain::events::{AppEvent, LogLevel};
 use crate::domain::models::{
     AccountInfo, AudienceType, GameCategory, RtmpCredentials, SecretString,
 };
-use crate::domain::monitor::{LiveConnectionState, LiveMonitorData};
+use crate::domain::monitor::{LiveConnectionState, LiveMonitorData, MonitorEvent};
 use crate::domain::states::{
     ApplyState, AuthState, CredentialState, ObsConnectionState, ObsOutputState,
 };
@@ -161,8 +161,9 @@ pub struct App {
     /// Result of the last font scan (custom + system fallbacks), shown in
     /// Settings → Chat fonts. Filled in by the background font loader.
     pub font_report: crate::ui::fonts::FontReport,
-    /// One-shot channel from the background font loader; `None` once drained.
-    font_rx: Option<std::sync::mpsc::Receiver<crate::ui::fonts::FontReport>>,
+    /// Background font loader; installs base fonts at start-up and large
+    /// script faces only when chat text first needs them.
+    pub fonts: crate::ui::fonts::FontManager,
     pub tebby: crate::ui::tebby::Tebby,
     pub display_name: String,
     pub show_timestamps: bool,
@@ -189,9 +190,9 @@ impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         theme::apply(&cc.egui_ctx);
         egui_extras::install_image_loaders(&cc.egui_ctx);
-        // Custom + system fonts load off the UI thread; the report arrives on
-        // this channel and is drained in `update`.
-        let font_rx = crate::ui::fonts::spawn_extended(cc.egui_ctx.clone());
+        // Custom + base system fonts load off the UI thread; large script
+        // faces are requested on demand as chat text needs them.
+        let fonts = crate::ui::fonts::FontManager::spawn(cc.egui_ctx.clone());
         #[cfg(windows)]
         let window_fx = crate::platform::window_fx::WindowEffects::new(cc);
 
@@ -267,7 +268,7 @@ impl App {
                 custom_dir: crate::ui::fonts::custom_font_dir(),
                 ..crate::ui::fonts::FontReport::default()
             },
-            font_rx: Some(font_rx),
+            fonts,
             tebby: crate::ui::tebby::Tebby::default(),
             display_name: "your_name".to_string(),
             show_timestamps: true,
@@ -407,6 +408,7 @@ impl App {
                 // The profile name always mirrors the signed-in account.
                 if !info.username.trim().is_empty() {
                     self.display_name = info.username.clone();
+                    self.fonts.ensure_text(&self.display_name);
                 }
                 // Default the LIVE monitor to this account's own TikTok handle.
                 if self.live_username.trim().is_empty() {
@@ -647,6 +649,21 @@ impl App {
                 self.live_state = state;
             }
             AppEvent::LiveMonitorEvent { event } => {
+                // Pull the matching fallback face the first time a script
+                // appears, so CJK/Thai/Indic/emoji render without keeping every
+                // large system font resident for users who never need it.
+                match &event {
+                    MonitorEvent::Chat(line) => {
+                        self.fonts.ensure_text(&line.user);
+                        self.fonts.ensure_text(&line.message);
+                    }
+                    MonitorEvent::Gift(line) => {
+                        self.fonts.ensure_text(&line.user);
+                        self.fonts.ensure_text(&line.gift);
+                    }
+                    MonitorEvent::Activity(line) => self.fonts.ensure_text(&line.user),
+                    _ => {}
+                }
                 self.live.apply(event);
             }
             AppEvent::Log { level, message } => {
@@ -902,11 +919,9 @@ impl eframe::App for App {
         self.images.poll(ctx);
         self.tick_search(ctx);
         self.expire_toast();
-        // Pick up the background font scan once it lands.
-        let loaded = self.font_rx.as_ref().and_then(|rx| rx.try_recv().ok());
-        if let Some(report) = loaded {
+        // Pick up font-worker reports (base fonts, lazy scripts, reloads).
+        if let Some(report) = self.fonts.poll() {
             self.font_report = report;
-            self.font_rx = None;
         }
         // Wake up exactly when the toast expires instead of relying on
         // incidental repaints (no continuous repaint loop needed).
