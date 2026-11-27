@@ -2,6 +2,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::application::Coordinator;
@@ -84,6 +85,9 @@ pub struct App {
     #[allow(dead_code)]
     pub store: Arc<dyn SecretStore>,
     pub coordinator: Coordinator,
+    /// When minimized, background events request a throttled repaint instead
+    /// of waking the UI for every chat message.
+    suspend_repaints: Arc<AtomicBool>,
 
     // auth / account
     pub token_input: String,
@@ -156,6 +160,12 @@ pub struct App {
     // shell / theme / navigation
     pub page: Page,
     pub theme_choice: theme::ThemeChoice,
+    /// Static Tebby mascot + shorter UI/reveal transitions.
+    pub optimize_mode: bool,
+    /// Settings toggle: minimize and release visual resources in background.
+    pub background_mode: bool,
+    background_pending_since: Option<Instant>,
+    was_minimized: bool,
     /// Old-frame texture and capture state for the circular theme reveal.
     theme_transition: crate::ui::theme_transition::ThemeTransition,
     /// Result of the last font scan (custom + system fallbacks), shown in
@@ -200,7 +210,17 @@ impl App {
         let store: Arc<dyn SecretStore> = Arc::new(KeyringStore);
 
         let ctx = cc.egui_ctx.clone();
-        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || ctx.request_repaint());
+        let suspend_repaints = Arc::new(AtomicBool::new(false));
+        let wake_suspended = suspend_repaints.clone();
+        let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if wake_suspended.load(Ordering::Relaxed) {
+                // Keep draining monitor events, but at most a few times per
+                // second while the window is hidden.
+                ctx.request_repaint_after(Duration::from_millis(250));
+            } else {
+                ctx.request_repaint();
+            }
+        });
         let coordinator = Coordinator::new(wake, store.clone(), None)
             .expect("failed to start background runtime");
 
@@ -209,11 +229,13 @@ impl App {
         let game_mask_id = config.stream.game_mask_id.clone();
         let mature = config.stream.audience == AudienceType::Mature;
         let obs_prefs: ObsPreferences = config.obs.clone();
+        let optimize_mode = config.optimize_mode;
 
         let mut app = Self {
             config,
             store,
             coordinator,
+            suspend_repaints,
             token_input: String::new(),
             show_token: false,
             current_token: None,
@@ -263,6 +285,10 @@ impl App {
             apply_request_id: 0,
             page: Page::Setup,
             theme_choice: theme::ThemeChoice::System,
+            optimize_mode,
+            background_mode: false,
+            background_pending_since: None,
+            was_minimized: false,
             theme_transition: crate::ui::theme_transition::ThemeTransition::default(),
             font_report: crate::ui::fonts::FontReport {
                 custom_dir: crate::ui::fonts::custom_font_dir(),
@@ -284,6 +310,9 @@ impl App {
             logs: VecDeque::new(),
         };
 
+        app.theme_transition.set_optimized(optimize_mode);
+        app.tebby.set_optimized(optimize_mode);
+        crate::ui::widgets::set_optimize_mode(&cc.egui_ctx, optimize_mode);
         app.log("Ready.");
         app.coordinator.send(Command::RestoreSession);
         if app.config.obs.auto_connect {
@@ -301,7 +330,52 @@ impl App {
         if choice == self.theme_choice {
             return;
         }
+        if choice == theme::ThemeChoice::Tebby {
+            // Decode off-thread while the old-theme screenshot is captured.
+            self.tebby.request_load(ctx);
+        }
         self.theme_transition.request(ctx, choice);
+    }
+
+    /// Enable static Tebby art and shorter transitions without disabling them.
+    pub fn set_optimize_mode(&mut self, ctx: &egui::Context, enabled: bool) {
+        self.optimize_mode = enabled;
+        self.theme_transition.set_optimized(enabled);
+        self.tebby.set_optimized(enabled);
+        crate::ui::widgets::set_optimize_mode(ctx, enabled);
+        if self.theme_choice == theme::ThemeChoice::Tebby {
+            self.tebby.request_load(ctx);
+        }
+    }
+
+    /// Minimize with visual work suspended while live monitoring continues.
+    pub fn set_background_mode(&mut self, ctx: &egui::Context, enabled: bool) {
+        if self.background_mode == enabled {
+            return;
+        }
+        self.background_mode = enabled;
+        if enabled {
+            self.release_background_resources(ctx);
+            self.background_pending_since = Some(Instant::now());
+            #[cfg(windows)]
+            match &self.window_fx {
+                Some(fx) => fx.minimize_to_background(),
+                None => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            }
+            #[cfg(not(windows))]
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        } else {
+            self.background_pending_since = None;
+            if self.theme_choice == theme::ThemeChoice::Tebby {
+                self.tebby.request_load(ctx);
+            }
+        }
+    }
+
+    /// Drop theme/decoded-image memory without touching monitor/chat state.
+    fn release_background_resources(&mut self, ctx: &egui::Context) {
+        self.tebby.unload();
+        self.images.release_memory(ctx);
     }
 
     pub fn toast(&mut self, level: LogLevel, message: impl Into<String>) {
@@ -343,6 +417,7 @@ impl App {
         self.config.obs.host = self.obs_host.clone();
         self.config.obs.port = self.obs_port.parse().unwrap_or(4455);
         self.config.obs.remember_password = self.obs_remember;
+        self.config.optimize_mode = self.optimize_mode;
 
         match self.config.save() {
             Ok(()) => self.toast(LogLevel::Info, "Configuration saved."),
@@ -856,10 +931,52 @@ impl eframe::App for App {
         self.theme_transition.update(ctx, &mut self.theme_choice);
         theme::set_choice(ctx, self.theme_choice);
         ctx.set_theme(self.theme_choice.egui_pref());
+
+        let native_minimized = ctx.input(|i| i.viewport().minimized).unwrap_or(false);
+        self.suspend_repaints
+            .store(native_minimized, Ordering::Relaxed);
+        if native_minimized {
+            if !self.was_minimized {
+                self.was_minimized = true;
+                self.background_pending_since = None;
+                if self.background_mode {
+                    self.release_background_resources(ctx);
+                }
+            }
+        } else if self.was_minimized {
+            self.was_minimized = false;
+            // Repaint immediately with all monitor events collected while the
+            // window was hidden, and restore only the active theme's assets.
+            ctx.request_repaint();
+            if self.theme_choice == theme::ThemeChoice::Tebby {
+                self.tebby.request_load(ctx);
+            }
+        }
+        // A restore clicked during the 200 ms minimize fade cancels that
+        // native transition; do not leave Tebby permanently suspended.
+        if !native_minimized
+            && self
+                .background_pending_since
+                .is_some_and(|since| since.elapsed() > Duration::from_millis(500))
+        {
+            self.background_pending_since = None;
+            if self.theme_choice == theme::ThemeChoice::Tebby {
+                self.tebby.request_load(ctx);
+            }
+        }
+
+        self.tebby.set_optimized(self.optimize_mode);
+        if self.theme_choice != theme::ThemeChoice::Tebby {
+            // Theme-owned GPU/CPU assets must not stay resident after leaving
+            // Tebby. In-flight decodes are discarded by dropping the receiver.
+            self.tebby.unload();
+        }
         // The mascot only exists in the Tebby theme, and only when the sidebar
         // is open. It must not drive a repaint loop when it isn't on screen.
-        let tebby_visible =
-            self.theme_choice == theme::ThemeChoice::Tebby && !self.sidebar_minimized;
+        let tebby_visible = self.theme_choice == theme::ThemeChoice::Tebby
+            && !self.sidebar_minimized
+            && !native_minimized
+            && self.background_pending_since.is_none();
         self.tebby
             .animate(ctx, ctx.input(|i| i.stable_dt), tebby_visible);
         // Responsive shell: the sidebar collapses on its own when the window is
@@ -916,7 +1033,11 @@ impl eframe::App for App {
         for event in self.coordinator.poll_events() {
             self.handle_event(event);
         }
-        self.images.poll(ctx);
+        if native_minimized {
+            self.images.poll_suspended();
+        } else {
+            self.images.poll(ctx);
+        }
         self.tick_search(ctx);
         self.expire_toast();
         // Pick up font-worker reports (base fonts, lazy scripts, reloads).
@@ -928,8 +1049,12 @@ impl eframe::App for App {
         if let Some(toast) = &self.toast {
             ctx.request_repaint_after(toast.until.saturating_duration_since(Instant::now()));
         }
-        crate::ui::panels::render(self, ctx);
-        self.theme_transition.paint(ctx);
+        // Hidden windows need monitor bookkeeping, not layout, image decoding
+        // or animation. The restore path requests a fresh full repaint.
+        if !native_minimized {
+            crate::ui::panels::render(self, ctx);
+            self.theme_transition.paint(ctx);
+        }
 
         #[cfg(windows)]
         if let Some(fx) = &mut self.window_fx {

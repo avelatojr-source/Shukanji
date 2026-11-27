@@ -118,6 +118,28 @@ impl ImageCache {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
     }
+
+    /// Drain completed downloads while the window is minimized without
+    /// registering decoded images. Bytes are already in the on-disk cache and
+    /// will be re-read on restore, so the hidden UI stays small.
+    pub fn poll_suspended(&mut self) {
+        while let Ok((url, _)) = self.result_rx.try_recv() {
+            self.in_flight.remove(&url);
+        }
+    }
+
+    /// Release every decoded image and its egui texture. Live downloads and
+    /// the on-disk cache are left intact.
+    pub fn release_memory(&mut self, ctx: &egui::Context) {
+        for (_, uri) in self.entries.drain() {
+            if let Some(uri) = uri {
+                ctx.forget_image(&uri);
+            }
+        }
+        self.entries.shrink_to_fit();
+        self.order.clear();
+        self.order.shrink_to_fit();
+    }
 }
 
 impl Default for ImageCache {

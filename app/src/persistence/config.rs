@@ -17,6 +17,9 @@ pub struct AppConfig {
     pub stream: StreamConfig,
     #[serde(default)]
     pub obs: ObsPreferences,
+    /// Static Tebby mascot + shorter UI transitions.
+    #[serde(default)]
+    pub optimize_mode: bool,
 }
 
 impl AppConfig {
@@ -92,6 +95,7 @@ mod tests {
         cfg.stream.game = "VALORANT".into();
         cfg.stream.audience = AudienceType::Mature;
         cfg.obs.port = 4466;
+        cfg.optimize_mode = true;
         cfg.save_to(&path).unwrap();
 
         let loaded = AppConfig::load_from(&path).unwrap();

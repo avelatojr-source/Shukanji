@@ -23,6 +23,28 @@ const RADIUS: u8 = 6;
 /// to read as a transition rather than a hard flip.
 pub const TRANSITION_SECS: f32 = 0.14;
 
+const OPTIMIZE_MODE_ID: &str = "shukanji.optimize_mode";
+
+/// Store the Settings → Optimize Mode preference for all custom widgets.
+pub fn set_optimize_mode(ctx: &egui::Context, enabled: bool) {
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new(OPTIMIZE_MODE_ID), enabled);
+    });
+}
+
+/// Keep transitions in Optimize Mode, just at half their normal duration.
+pub fn animation_secs(ctx: &egui::Context, normal: f32) -> f32 {
+    let optimized = ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new(OPTIMIZE_MODE_ID))
+            .unwrap_or(false)
+    });
+    if optimized {
+        (normal * 0.5).max(0.04)
+    } else {
+        normal
+    }
+}
+
 /// Linear RGBA mix between two colors (`t = 0` → `a`, `t = 1` → `b`).
 pub fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
@@ -45,14 +67,16 @@ pub fn with_alpha(c: Color32, alpha: f32) -> Color32 {
 /// 0 → 1 hover fade for a custom-painted widget. egui keeps requesting
 /// repaints while the value animates, so no timer is needed.
 pub fn hover_t(ui: &Ui, response: &Response, active: bool) -> f32 {
+    let secs = animation_secs(ui.ctx(), TRANSITION_SECS);
     ui.ctx()
-        .animate_bool_with_time(response.id.with("hover"), active, TRANSITION_SECS)
+        .animate_bool_with_time(response.id.with("hover"), active, secs)
 }
 
 /// 0 → 1 pressed fade; slightly faster than the hover fade so clicks feel snappy.
 pub fn press_t(ui: &Ui, response: &Response, active: bool) -> f32 {
+    let secs = animation_secs(ui.ctx(), 0.08);
     ui.ctx()
-        .animate_bool_with_time(response.id.with("press"), active, 0.08)
+        .animate_bool_with_time(response.id.with("press"), active, secs)
 }
 
 /// The three looks a button eases between (rest → hover → pressed).
@@ -456,9 +480,10 @@ pub fn vertical_grip(ui: &mut Ui, value: &mut f32, min: f32, max: f32) -> Respon
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 12.0), Sense::drag());
     let hot = response.hovered() || response.dragged();
+    let secs = animation_secs(ui.ctx(), TRANSITION_SECS);
     let t = ui
         .ctx()
-        .animate_bool_with_time(response.id.with("hot"), hot, TRANSITION_SECS);
+        .animate_bool_with_time(response.id.with("hot"), hot, secs);
     let bar_width = 44.0 + (64.0 - 44.0) * t;
     let color = lerp_color(p.line, p.accent, t);
     ui.painter().rect_filled(
@@ -557,9 +582,10 @@ pub fn nav_item(ui: &mut Ui, icon: &str, text: &str, active: bool, expand: f32) 
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 36.0), Sense::click());
     let radius = CornerRadius::same(RADIUS);
     // Ease both the selection change and the hover highlight.
+    let secs = animation_secs(ui.ctx(), TRANSITION_SECS);
     let at = ui
         .ctx()
-        .animate_bool_with_time(response.id.with("active"), active, TRANSITION_SECS);
+        .animate_bool_with_time(response.id.with("active"), active, secs);
     let ht = hover_t(ui, &response, response.hovered());
     let idle_bg = lerp_color(Color32::TRANSPARENT, p.hover, at);
     let over_bg = lerp_color(p.nav_hover, p.hover, at);

@@ -25,7 +25,7 @@ pub fn render(app: &mut App, ctx: &egui::Context) {
     let minimized_t = ctx.animate_value_with_time(
         egui::Id::new("shukanji.sidebar_minimized"),
         if app.sidebar_minimized { 1.0 } else { 0.0 },
-        0.18,
+        widgets::animation_secs(ctx, 0.18),
     );
     let expand = 1.0 - minimized_t;
     let sidebar_width = 220.0 + (68.0 - 220.0) * minimized_t;
@@ -60,7 +60,7 @@ pub fn render(app: &mut App, ctx: &egui::Context) {
     let collapse_t = ctx.animate_value_with_time(
         egui::Id::new("shukanji.go_live_bar_collapsed"),
         if app.go_live_bar_collapsed { 1.0 } else { 0.0 },
-        0.16,
+        widgets::animation_secs(ctx, 0.16),
     );
     egui::TopBottomPanel::bottom("go_live_bar")
         .exact_height(76.0 + (34.0 - 76.0) * collapse_t)
@@ -215,8 +215,12 @@ fn group_label(ui: &mut egui::Ui, text: &str, expand: f32) {
 
 fn nav(ui: &mut egui::Ui, app: &mut App, page: Page, icon: &str, label: &str, expand: f32) {
     let active = app.page == page;
-    let response = widgets::nav_item(ui, icon, label, active, expand);
-    let response = response.on_hover_text(label);
+    let mut response = widgets::nav_item(ui, icon, label, active, expand);
+    // Expanded rows already show their label; only the icon-only rail needs a
+    // tooltip. This prevents a second wall of text on every expanded hover.
+    if expand <= 0.02 {
+        response = response.on_hover_text(label);
+    }
     if response.clicked() {
         app.page = page;
     }
@@ -677,8 +681,11 @@ fn setup_details(ui: &mut egui::Ui, app: &mut App) {
 fn suggestions_list(ui: &mut egui::Ui, app: &mut App) {
     let p = theme::pal(ui.ctx());
     let mut selected: Option<GameCategory> = None;
-    // Match the field above: full available width.
+    // Match the field above: full available width. Use the remaining visible
+    // height instead of a fixed five-row window; the outer page still scrolls
+    // normally for the controls below, so nothing overlaps.
     let full_width = ui.available_width();
+    let list_height = (ui.clip_rect().bottom() - ui.cursor().top() - 16.0).max(120.0);
     egui::Frame::new()
         .fill(p.sidebar)
         .stroke(Stroke::new(1.0_f32, p.field_border))
@@ -688,8 +695,8 @@ fn suggestions_list(ui: &mut egui::Ui, app: &mut App) {
             ui.set_min_width(full_width - 8.0);
             egui::ScrollArea::vertical()
                 .id_salt("game_suggestions")
-                .max_height(160.0)
-                .auto_shrink([false, false])
+                .max_height(list_height)
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     for category in &app.suggestions {
                         if suggestion_row(ui, &category.full_name, &category.game_mask_id).clicked()
@@ -724,19 +731,38 @@ fn suggestion_row(ui: &mut egui::Ui, name: &str, mask_id: &str) -> egui::Respons
             StrokeKind::Inside,
         );
     }
-    ui.painter().text(
+    // Long IDs consume most of a narrow column. Keep them on wide rows only;
+    // the selected ID is always shown below the list. This lets the game name
+    // itself remain readable instead of clipping to a few characters.
+    let show_id = !mask_id.is_empty() && width >= 520.0;
+    let id_font = FontId::monospace(12.0);
+    let id_width = if show_id {
+        ui.painter()
+            .layout_no_wrap(mask_id.to_owned(), id_font.clone(), p.muted)
+            .size()
+            .x
+            + 12.0
+    } else {
+        0.0
+    };
+    let name_right = (rect.right() - 10.0 - id_width).max(rect.left() + 20.0);
+    let name_rect = Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, rect.top()),
+        egui::pos2(name_right, rect.bottom()),
+    );
+    ui.painter().with_clip_rect(name_rect).text(
         egui::pos2(rect.left() + 10.0, rect.center().y),
         Align2::LEFT_CENTER,
         name,
         FontId::proportional(14.0),
         p.text,
     );
-    if !mask_id.is_empty() {
+    if show_id {
         ui.painter().text(
             egui::pos2(rect.right() - 10.0, rect.center().y),
             Align2::RIGHT_CENTER,
             mask_id,
-            FontId::monospace(12.0),
+            id_font,
             p.muted,
         );
     }
@@ -1054,7 +1080,7 @@ fn chat_tab(ui: &mut egui::Ui, label: &str, active: bool) -> egui::Response {
     let at = ui.ctx().animate_bool_with_time(
         response.id.with("active"),
         active,
-        widgets::TRANSITION_SECS,
+        widgets::animation_secs(ui.ctx(), widgets::TRANSITION_SECS),
     );
     let ht = widgets::hover_t(ui, &response, response.hovered());
     let color = widgets::lerp_color(p.muted, p.text, at.max(ht));
@@ -1472,6 +1498,38 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
                     ui.add_space(12.0);
                     theme_card(ui, app, theme::ThemeChoice::Tebby);
                 });
+                ui.add_space(12.0);
+                let mut optimize = app.optimize_mode;
+                if ui
+                    .checkbox(&mut optimize, "Optimize Mode")
+                    .on_hover_text("Static Tebby mascot and shorter UI transitions")
+                    .changed()
+                {
+                    app.set_optimize_mode(ui.ctx(), optimize);
+                }
+                ui.label(
+                    RichText::new(
+                        "Uses static Tebby art and shorter transitions to reduce RAM and rendering work. Live chat monitoring stays active.",
+                    )
+                    .color(p.muted)
+                    .size(12.0),
+                );
+                ui.add_space(8.0);
+                let mut background = app.background_mode;
+                if ui
+                    .checkbox(&mut background, "Minimize to background (low power)")
+                    .on_hover_text("Minimize and release visual resources while monitoring continues")
+                    .changed()
+                {
+                    app.set_background_mode(ui.ctx(), background);
+                }
+                ui.label(
+                    RichText::new(
+                        "Pauses visual rendering and releases Tebby/image textures while minimized. Restore the window to resume.",
+                    )
+                    .color(p.muted)
+                    .size(12.0),
+                );
             });
             ui.add_space(32.0);
 

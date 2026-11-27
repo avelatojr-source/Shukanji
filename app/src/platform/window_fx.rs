@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::System::ProcessStatus::EmptyWorkingSet;
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AW_BLEND, AW_HIDE, AnimateWindow, CallWindowProcW, DefWindowProcW, DestroyWindow, GWL_EXSTYLE,
     GWLP_WNDPROC, GetWindowLongPtrW, IsIconic, KillTimer, LWA_ALPHA, SC_CLOSE, SC_MINIMIZE,
@@ -28,6 +30,7 @@ const TRANSITION_TIMER_ID: usize = 0x534B_4E4A; // "SKNJ"
 
 static PREVIOUS_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 static CLOSE_ANIMATED: AtomicBool = AtomicBool::new(false);
+static TRIM_ON_MINIMIZE: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TransitionKind {
@@ -91,6 +94,13 @@ impl WindowEffects {
             started_at: None,
             original_ex_style,
         })
+    }
+
+    /// Minimize through the same smooth native fade as the title-bar button,
+    /// then trim unused pages for the explicit low-power background mode.
+    pub fn minimize_to_background(&self) {
+        TRIM_ON_MINIMIZE.store(true, Ordering::Release);
+        begin_transition(self.hwnd, TransitionKind::Minimizing);
     }
 
     /// Drive the launch fade. Called every egui frame until fully opaque.
@@ -176,10 +186,14 @@ unsafe extern "system" fn animated_wnd_proc(
                 // look out of place.
                 let was_minimized = unsafe { IsIconic(hwnd) } != 0;
                 let was_minimizing = transition_kind() == TransitionKind::Minimizing;
-                let result = unsafe { forward_message(hwnd, message, wparam, lparam) };
                 if was_minimized {
+                    // Set opacity to zero *before* Windows shows the restored
+                    // window. Starting the fade afterwards allowed one opaque
+                    // frame through, which looked like a blink on taskbar click.
                     begin_transition(hwnd, TransitionKind::Restoring);
-                } else if was_minimizing {
+                }
+                let result = unsafe { forward_message(hwnd, message, wparam, lparam) };
+                if !was_minimized && was_minimizing {
                     // The window never actually minimized; cancel the fade so
                     // its timer cannot minimize the window after this restore.
                     cancel_minimize_transition(hwnd);
@@ -221,6 +235,7 @@ fn cancel_minimize_transition(hwnd: HWND) {
     }
     state.kind = TransitionKind::Idle;
     state.started_at = None;
+    TRIM_ON_MINIMIZE.store(false, Ordering::Release);
 }
 
 fn begin_transition(hwnd: HWND, kind: TransitionKind) {
@@ -306,6 +321,12 @@ fn advance_transition(hwnd: HWND) {
             // Minimize while still transparent. Restore opacity and the normal
             // window style only after it is hidden, preventing any flash.
             ShowWindow(hwnd, SW_MINIMIZE);
+            if TRIM_ON_MINIMIZE.swap(false, Ordering::AcqRel) {
+                // Only the explicit background mode requests this. It runs
+                // after the fade, so normal window interactions never pay the
+                // page-fault cost of trimming the working set.
+                EmptyWorkingSet(GetCurrentProcess());
+            }
         }
         SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, original_ex_style);

@@ -14,8 +14,8 @@ fn main() {
     {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("assets/app-icon.ico");
-        resource.set("ProductName", "ShuKanji");
-        resource.set("FileDescription", "ShuKanji — TikTok LIVE companion");
+        resource.set("ProductName", "Shunkanji");
+        resource.set("FileDescription", "Shunkanji");
         resource.set("OriginalFilename", "shukanji.exe");
         resource.set("LegalCopyright", "");
         if let Err(error) = resource.compile() {

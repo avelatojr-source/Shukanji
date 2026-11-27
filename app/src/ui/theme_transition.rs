@@ -16,6 +16,7 @@ use egui::{Color32, Pos2, Rect, TextureHandle, TextureId, Vec2, pos2};
 use super::theme::ThemeChoice;
 
 const REVEAL_DURATION: Duration = Duration::from_millis(460);
+const OPTIMIZED_REVEAL_DURATION: Duration = Duration::from_millis(180);
 const SEGMENTS: usize = 128;
 
 #[derive(Default)]
@@ -29,9 +30,23 @@ pub struct ThemeTransition {
     /// Segment angles for the current window, including its four corners.
     /// Computed once per reveal so `paint` does no trigonometry or sorting.
     angles: Vec<f32>,
+    optimized: bool,
 }
 
 impl ThemeTransition {
+    /// Optimize Mode keeps the reveal, but shortens it to reduce repaints and
+    /// the time the full-window screenshot texture stays resident.
+    pub fn set_optimized(&mut self, optimized: bool) {
+        self.optimized = optimized;
+    }
+
+    fn duration(&self) -> Duration {
+        if self.optimized {
+            OPTIMIZED_REVEAL_DURATION
+        } else {
+            REVEAL_DURATION
+        }
+    }
     /// Queue a theme change. During an active reveal, a newer click is applied
     /// as soon as the current reveal completes.
     pub fn request(&mut self, ctx: &egui::Context, choice: ThemeChoice) {
@@ -95,7 +110,7 @@ impl ThemeTransition {
 
         let finished = self
             .started_at
-            .is_some_and(|started| started.elapsed() >= REVEAL_DURATION);
+            .is_some_and(|started| started.elapsed() >= self.duration());
         if finished {
             self.old_frame = None;
             self.started_at = None;
@@ -113,7 +128,7 @@ impl ThemeTransition {
             return;
         };
         let t =
-            (started_at.elapsed().as_secs_f32() / REVEAL_DURATION.as_secs_f32()).clamp(0.0, 1.0);
+            (started_at.elapsed().as_secs_f32() / self.duration().as_secs_f32()).clamp(0.0, 1.0);
         let progress = smoothstep(t);
         let rect = ctx.screen_rect();
         let center = rect.center();

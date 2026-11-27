@@ -5,6 +5,36 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 
 ## What changed
 
+### Tebby, low-power background mode + UI fixes (latest)
+
+- **Smooth Tebby switching:** the large sprite sheets are decoded and resized
+  for the current display scale on a `tebby-load` worker, never on the UI
+  thread. The resized sheets are much smaller than the original 3648×2064 /
+  3648×1376 RGBA images. Leaving Tebby drops its textures and discards any
+  in-flight decode; returning reloads only the active theme. The mascot keeps
+  its 24 fps cadence when the window is unfocused instead of slowing to 2.5 fps.
+- **Settings → Optimize Mode:** keeps the Tebby theme with a static full-body
+  mascot and avatar instead of the two animated sheets, and shortens (rather
+  than removes) widget, sidebar and theme-reveal transitions. The preference is
+  included in the existing **Save config** flow.
+- **Settings → Minimize to background (low power):** uses the native minimize
+  fade, pauses hidden-window layout/rendering, releases Tebby and decoded image
+  textures, discards new decoded images while hidden, and trims the working set
+  after the fade. Monitor events still drain with throttled UI wake-ups, so
+  live chat monitoring does not block or depend on repaints. Restoring resumes
+  normal rendering and reloads only the active theme's assets.
+- **Restore blink removed:** opacity is set to zero *before* Windows restores a
+  minimized window, eliminating the single opaque frame that used to flash on
+  a taskbar click. The smooth restore fade remains.
+- **Game category:** the suggestion list now uses the remaining visible height
+  and scrolls vertically; short result sets shrink naturally. Long names no
+  longer overlap category IDs, and narrow rows hide only the ID (the selected
+  ID still appears below) so the game name stays readable.
+- **Sidebar hover:** expanded rows no longer duplicate their visible labels in
+  tooltips; icon-only rail rows keep the appropriate label tooltip.
+- **Task Manager name:** the executable's Windows `FileDescription` and
+  `ProductName` are now **Shunkanji** only.
+
 ### Final pass — heavy RAM optimization + cleanup
 
 - **Lazy script fonts (biggest win):** start-up now installs only the bundled
@@ -121,13 +151,16 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 | --- | --- |
 | `app/src/ui/fonts.rs` | **New** — `FontManager` worker, bundled fast path, base + on-demand script fonts, scan report, tests |
 | `app/src/ui/theme.rs` | Font install moved to `fonts.rs` (bundled fast path at start-up) |
-| `app/src/ui/image_cache.rs` | 512-entry cap, `forget_image` eviction, 2 download workers, eviction test |
+| `app/src/ui/image_cache.rs` | 512-entry cap, `forget_image` eviction, 2 download workers, hidden-mode drain/release helpers, tests |
+| `app/src/ui/tebby.rs` | Off-thread display-scale decoding, texture unload, static Optimize Mode, 24 fps background cadence |
 | `app/src/ui/mod.rs` | Register `fonts` module |
-| `app/src/app.rs` | Store `font_report` (+ background channel), toast repaint scheduling; theme transition state + `change_theme`, Ctrl+T shortcut |
-| `app/src/ui/widgets.rs` | Animated button/stream-button/nav/toggle/grip states + color-lerp/alpha helpers + tests |
-| `app/src/ui/panels.rs` | Animated chat tabs + theme cards; Chat fonts settings section; animated sidebar + Go Live bar minimizers; theme cards/toggle route through the reveal |
-| `app/src/ui/theme_transition.rs` | **New** — screenshot capture, expanding circular reveal mesh, queued theme changes + tests |
-| `app/src/platform/window_fx.rs` | **New** — Win32 native open/close fades, timer-driven minimize/restore ramps + tests |
+| `app/src/app.rs` | Font/theme state, Tebby lifecycle, Optimize/background modes, throttled hidden-window event wake-ups |
+| `app/src/ui/widgets.rs` | Animated widget states + color helpers + Optimize Mode durations |
+| `app/src/ui/panels.rs` | Theme/settings controls, taller non-overlapping game list, rail-only nav tooltips |
+| `app/src/ui/theme_transition.rs` | **New** — screenshot reveal mesh, exact corners, queued changes, shorter optimized reveal |
+| `app/src/platform/window_fx.rs` | **New** — Win32 native fades, blink-free restore, background working-set trim |
+| `app/src/persistence/config.rs` | Persist Optimize Mode with the existing config flow |
+| `app/build.rs` | Windows display name set to `Shunkanji` |
 | `app/src/platform/mod.rs` | Register the Windows-only native effects module |
 | `app/src/main.rs` | Start hidden on Windows for the launch fade |
 | `app/Cargo.toml`, `app/Cargo.lock` | Add `raw-window-handle` and Windows API dependencies |
@@ -137,9 +170,9 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 ## Verification
 
 - `cargo check --all-targets` — clean, no warnings
-- `cargo test` — 127 passed, 0 failed, 1 ignored (includes new reveal-mesh
-  coverage/corner, smoothstep, script-detection, family-order and
-  image-eviction tests)
+- `cargo test` — 129 passed, 0 failed, 1 ignored (includes reveal-mesh,
+  smoothstep, script-detection, family-order, image-eviction, Tebby lifecycle
+  and config tests)
 - `cargo build --release` — produces the updated `shukanji.exe` (also copied to
   the folder root)
 - RAM probe: start-up 156 MB working set / 98 MB private (was 358 / 312 MB);
@@ -151,6 +184,13 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
   growing to the full window, ending on the new theme
 - Live Windows probe: Settings → Chat fonts preview renders Japanese, Chinese,
   Korean, Arabic, Thai, Greek and Cyrillic after the on-demand load
+- Live Windows probe: Tebby → Optimize Mode switches to static art, and System
+  drops the mascot; game names remain readable and expanded sidebar rows show
+  no duplicate tooltip
+- Background-mode probe: 15.6 ms CPU over 4 seconds while minimized, 13.2 MB
+  working set after the trim, restore alpha ramps smoothly without the initial
+  opaque blink
+- Release metadata: `FileDescription = Shunkanji`, `ProductName = Shunkanji`
 
 ## Build / run
 
