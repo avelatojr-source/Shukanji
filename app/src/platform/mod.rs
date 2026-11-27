@@ -2,4 +2,6 @@
 
 pub mod credentials;
 #[cfg(windows)]
+pub mod updater;
+#[cfg(windows)]
 pub mod window_fx;

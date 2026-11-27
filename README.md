@@ -82,6 +82,8 @@ The repository includes project documentation, the import helper, and downloadab
 
 A copy of the Windows executable is available here: **[Download shukanji.exe](shukanji.exe)**.
 
+**Updating the old app:** run the downloaded executable. It locates a running or previously recorded ShuKanji installation, closes it gracefully, replaces only `shukanji.exe`, and relaunches it. If the old copy cannot be found, choose **Yes** and select its executable; choose **No** to run the download without updating another file. Existing settings, credentials, logs, and caches are preserved. Use `--no-update` to bypass this check.
+
 For versioned releases, the recommended place is the repository's **[Releases](https://github.com/avelatojr-source/Shukanji/releases)** page, where the executable can be packaged with the end-user guide.
 
 ## Privacy and stored settings

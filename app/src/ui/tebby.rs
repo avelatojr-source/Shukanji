@@ -4,9 +4,9 @@
 //!
 //! The source sheets are much larger than the on-screen mascot. They are
 //! decoded and resized on a worker thread for the current display scale, then
-//! uploaded once on the UI thread. Optimize Mode keeps only a static first
-//! frame and the avatar, so it neither animates nor keeps the sprite sheets in
-//! memory. Leaving the Tebby theme drops every Tebby texture.
+//! uploaded once on the UI thread. Optimize Mode keeps only the supplied
+//! transparent static artwork and the avatar, so it neither animates nor keeps
+//! the sprite sheets in memory. Leaving Tebby drops every Tebby texture.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Duration;
@@ -45,7 +45,7 @@ pub struct Tebby {
 }
 
 struct Textures {
-    /// Full idle sheet normally; one static frame in Optimize Mode.
+    /// Full idle sheet normally; transparent static artwork in Optimize Mode.
     idle: TextureHandle,
     duck: Option<TextureHandle>,
     avatar: TextureHandle,
@@ -128,7 +128,7 @@ impl Tebby {
         self.wait = 0.0;
     }
 
-    /// Switch between animated sheets and a single static mascot frame.
+    /// Switch between animated sheets and the optimized static mascot.
     pub fn set_optimized(&mut self, optimized: bool) {
         if self.optimized != optimized {
             self.optimized = optimized;
@@ -201,9 +201,17 @@ impl Tebby {
         if minimized {
             return;
         }
+        let size = if self.optimized {
+            // The supplied artwork is wider than the animated cel. Preserve
+            // its aspect ratio instead of stretching it into the old frame.
+            let texture_size = textures.idle.size_vec2();
+            Vec2::new(FRAME_W, FRAME_W * texture_size.y / texture_size.x)
+        } else {
+            Vec2::new(FRAME_W, FRAME_H)
+        };
         let screen = ctx.screen_rect();
-        let pos = Pos2::new(screen.left(), screen.bottom() - 50.0 - FRAME_H);
-        let rect = Rect::from_min_size(pos, Vec2::new(FRAME_W, FRAME_H));
+        let pos = Pos2::new(screen.left(), screen.bottom() - 50.0 - size.y);
+        let rect = Rect::from_min_size(pos, size);
         let (sheet, uv) = if self.optimized {
             (
                 &textures.idle,
@@ -243,7 +251,7 @@ fn frame_pixels(scale: f32) -> (u32, u32) {
 
 fn decode_assets(scale: f32, optimized: bool) -> Option<DecodedAssets> {
     let idle = if optimized {
-        decode_static_frame(include_bytes!("../../assets/tebby/idle.webp"), scale)
+        decode_optimized(include_bytes!("../../assets/tebby/optimized.png"), scale)
     } else {
         decode_sheet(
             include_bytes!("../../assets/tebby/idle.webp"),
@@ -272,14 +280,13 @@ fn decode_sheet(bytes: &[u8], rows: usize, scale: f32) -> Option<ColorImage> {
     Some(resize_rgba(source, width, height))
 }
 
-fn decode_static_frame(bytes: &[u8], scale: f32) -> Option<ColorImage> {
+fn decode_optimized(bytes: &[u8], scale: f32) -> Option<ColorImage> {
     let source = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let cell_w = source.width() / COLS as u32;
-    let cell_h = source.height() / IDLE_ROWS as u32;
-    let first = image::imageops::crop_imm(&source, 0, 0, cell_w, cell_h).to_image();
-    drop(source);
-    let (width, height) = frame_pixels(scale);
-    Some(resize_rgba(first, width, height))
+    let width = (FRAME_W * scale.clamp(1.0, 2.0)).round() as u32;
+    let height = (width as f32 * source.height() as f32 / source.width() as f32)
+        .round()
+        .max(1.0) as u32;
+    Some(resize_rgba(source, width, height))
 }
 
 fn decode_avatar(bytes: &[u8], scale: f32) -> Option<ColorImage> {
@@ -359,6 +366,18 @@ mod tests {
         assert_eq!((w, h), (380, 430));
         // The source cell is 304×344; a 1× sheet is substantially smaller.
         assert!(190 * 215 < 304 * 344);
+    }
+
+    #[test]
+    fn optimized_artwork_keeps_transparency_and_aspect_ratio() {
+        let image = decode_optimized(include_bytes!("../../assets/tebby/optimized.png"), 1.0)
+            .expect("optimized artwork should decode");
+        assert_eq!(image.size, [190, 148]);
+        assert_eq!(
+            image.pixels[0].a(),
+            0,
+            "the background must stay transparent"
+        );
     }
 
     #[test]

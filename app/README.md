@@ -74,7 +74,10 @@ The UI never conflates credential retrieval with a live broadcast:
   reliably needs the streamer's own browser session, which is not something this
   tool should ask for.
 - Overlays, scripting/plugins, multi-account, global hotkeys, stream history,
-  Discord webhooks, a local REST API, an auto-updater, and macOS/Linux builds.
+  Discord webhooks, a local REST API, online update checks, and macOS/Linux builds.
+  The downloaded Windows release does include a portable update bootstrap that
+  replaces an existing local installation; it does not check for or download
+  updates itself.
 - Persistence of UI preferences (theme, display name, panel sizes): these reset
   each launch. Only the stream details and OBS connection settings are saved.
 

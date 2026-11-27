@@ -13,10 +13,11 @@ project. The original `Desktop\Shukanji` checkout is untouched.
   3648×1376 RGBA images. Leaving Tebby drops its textures and discards any
   in-flight decode; returning reloads only the active theme. The mascot keeps
   its 24 fps cadence when the window is unfocused instead of slowing to 2.5 fps.
-- **Settings → Optimize Mode:** keeps the Tebby theme with a static full-body
-  mascot and avatar instead of the two animated sheets, and shortens (rather
-  than removes) widget, sidebar and theme-reveal transitions. The preference is
-  included in the existing **Save config** flow.
+- **Settings → Optimize Mode:** keeps the Tebby theme with the supplied
+  transparent full-body sidebar artwork and the existing avatar instead of the
+  two animated sheets, and shortens (rather than removes) widget, sidebar and
+  theme-reveal transitions. The artwork keeps its aspect ratio and alpha
+  channel. The preference is included in the existing **Save config** flow.
 - **Settings → Minimize to background (low power):** uses the native minimize
   fade, pauses hidden-window layout/rendering, releases Tebby and decoded image
   textures, discards new decoded images while hidden, and trims the working set
@@ -26,14 +27,23 @@ project. The original `Desktop\Shukanji` checkout is untouched.
 - **Restore blink removed:** opacity is set to zero *before* Windows restores a
   minimized window, eliminating the single opaque frame that used to flash on
   a taskbar click. The smooth restore fade remains.
-- **Game category:** the suggestion list now uses the remaining visible height
-  and scrolls vertically; short result sets shrink naturally. Long names no
-  longer overlap category IDs, and narrow rows hide only the ID (the selected
-  ID still appears below) so the game name stays readable.
+- **Game category:** suggestions are a foreground dropdown anchored to the
+  field, floating above Mature content/Category ID rather than pushing them
+  down. It uses the available height to the Go Live bar, scrolls vertically,
+  and closes on selection, outside click or Escape. Each long category ID has
+  a separate clipped line beneath its game name, so text cannot overlap.
 - **Sidebar hover:** expanded rows no longer duplicate their visible labels in
-  tooltips; icon-only rail rows keep the appropriate label tooltip.
+  tooltips; icon-only rail rows keep the appropriate label tooltip. Icons are
+  painted without their own hover targets, so moving the cursor over an icon
+  no longer steals hover from the row or flickers its highlight.
 - **Task Manager name:** the executable's Windows `FileDescription` and
   `ProductName` are now **Shunkanji** only.
+- **Portable old-app updates:** the downloaded release locates a running or
+  previously recorded installation (with a file-picker fallback), closes it
+  gracefully, atomically replaces only `shukanji.exe`, and relaunches it. The
+  install path is remembered for the next update. Settings, credentials, logs
+  and caches are untouched. Debug builds never update; `--no-update` bypasses
+  the release bootstrap.
 
 ### Final pass — heavy RAM optimization + cleanup
 
@@ -152,17 +162,19 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 | `app/src/ui/fonts.rs` | **New** — `FontManager` worker, bundled fast path, base + on-demand script fonts, scan report, tests |
 | `app/src/ui/theme.rs` | Font install moved to `fonts.rs` (bundled fast path at start-up) |
 | `app/src/ui/image_cache.rs` | 512-entry cap, `forget_image` eviction, 2 download workers, hidden-mode drain/release helpers, tests |
-| `app/src/ui/tebby.rs` | Off-thread display-scale decoding, texture unload, static Optimize Mode, 24 fps background cadence |
+| `app/src/ui/tebby.rs` | Off-thread display-scale decoding, texture unload, transparent optimized artwork, 24 fps background cadence |
+| `app/assets/tebby/optimized.png` | **New** — supplied full-body transparent artwork used only in Optimize Mode |
 | `app/src/ui/mod.rs` | Register `fonts` module |
 | `app/src/app.rs` | Font/theme state, Tebby lifecycle, Optimize/background modes, throttled hidden-window event wake-ups |
-| `app/src/ui/widgets.rs` | Animated widget states + color helpers + Optimize Mode durations |
-| `app/src/ui/panels.rs` | Theme/settings controls, taller non-overlapping game list, rail-only nav tooltips |
+| `app/src/ui/widgets.rs` | Animated widget states + Optimize durations; non-interactive icon painting fixes nav hover flicker |
+| `app/src/ui/panels.rs` | Theme/settings controls, separate name/ID lanes in the scrolling game list, rail-only nav tooltips |
 | `app/src/ui/theme_transition.rs` | **New** — screenshot reveal mesh, exact corners, queued changes, shorter optimized reveal |
 | `app/src/platform/window_fx.rs` | **New** — Win32 native fades, blink-free restore, background working-set trim |
 | `app/src/persistence/config.rs` | Persist Optimize Mode with the existing config flow |
 | `app/build.rs` | Windows display name set to `Shunkanji` |
 | `app/src/platform/mod.rs` | Register the Windows-only native effects module |
-| `app/src/main.rs` | Start hidden on Windows for the launch fade |
+| `app/src/main.rs` | Start hidden on Windows for the launch fade; release-only portable update bootstrap |
+| `app/src/platform/updater.rs` | **New** — locate/close/replace/relaunch old portable installations, with tests |
 | `app/Cargo.toml`, `app/Cargo.lock` | Add `raw-window-handle` and Windows API dependencies |
 | `docs/CHAT_REPLY_RESEARCH.md` | **New** — chat-reply findings and API contract |
 | `docs/UPDATE.md` | **New** — this file |
@@ -170,9 +182,10 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 ## Verification
 
 - `cargo check --all-targets` — clean, no warnings
-- `cargo test` — 129 passed, 0 failed, 1 ignored (includes reveal-mesh,
-  smoothstep, script-detection, family-order, image-eviction, Tebby lifecycle
-  and config tests)
+- `cargo test` — 136 passed, 0 failed, 1 ignored (includes reveal-mesh,
+  smoothstep, script-detection, family-order, image-eviction, Tebby lifecycle,
+  optimized-art alpha/aspect ratio, game-name/ID lanes, field-frame alignment,
+  sidebar-hover and safe temporary-file update replacement tests)
 - `cargo build --release` — produces the updated `shukanji.exe` (also copied to
   the folder root)
 - RAM probe: start-up 156 MB working set / 98 MB private (was 358 / 312 MB);
@@ -190,6 +203,12 @@ Center (the app's **Open Live Monitor** button) remains the safe reply path.
 - Background-mode probe: 15.6 ms CPU over 4 seconds while minimized, 13.2 MB
   working set after the trim, restore alpha ramps smoothly without the initial
   opaque blink
+- Game-dropdown probe: suggestions float above Mature/Category ID, align with
+  the field, scroll down to the Go Live bar and leave the underlying layout fixed
+- Isolated portable-update probes: both an explicit target and automatic
+  running-install detection closed the temporary old copy, changed its exe hash
+  to the new release, recorded the install path and relaunched it; the real old
+  installation hash stayed unchanged
 - Release metadata: `FileDescription = Shunkanji`, `ProductName = Shunkanji`
 
 ## Build / run

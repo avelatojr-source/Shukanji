@@ -20,6 +20,18 @@ fn main() -> eframe::Result<()> {
     let log_dir = tiktok_stream_tool::persistence::paths::log_dir();
     let _log_guard = tiktok_stream_tool::diagnostics::logging::init(log_dir.as_deref());
 
+    // A downloaded release can replace the old portable installation before
+    // opening the GUI. Debug builds never perform updates.
+    #[cfg(windows)]
+    if !cfg!(debug_assertions)
+        && matches!(
+            tiktok_stream_tool::platform::updater::startup(),
+            tiktok_stream_tool::platform::updater::StartupAction::Exit
+        )
+    {
+        return Ok(());
+    }
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 800.0])
         .with_min_inner_size([1000.0, 640.0])

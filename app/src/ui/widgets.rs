@@ -514,7 +514,13 @@ pub fn danger_button(ui: &mut Ui, text: &str, enabled: bool) -> Response {
 }
 
 /// A labelled text field. The caller decides masking via `password`.
-pub fn field(ui: &mut Ui, label: &str, value: &mut String, mono: bool, password: bool) {
+pub fn field(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    mono: bool,
+    password: bool,
+) -> Response {
     let p = theme::pal(ui.ctx());
     ui.label(RichText::new(label).color(p.text_soft).size(13.0));
     ui.add_space(6.0);
@@ -527,7 +533,11 @@ pub fn field(ui: &mut Ui, label: &str, value: &mut String, mono: bool, password:
     if password {
         edit = edit.password(true);
     }
-    ui.add_sized([ui.available_width(), 40.0], edit);
+    let mut response = ui.add_sized([ui.available_width(), 40.0], edit);
+    // egui returns the text's inner rect, excluding the margin above. Callers
+    // anchoring popups need the actual outer field frame instead.
+    response.rect = response.rect.expand2(Vec2::new(12.0, 10.0));
+    response
 }
 
 /// A circular avatar: first letter of `name` in pink on the hover color,
@@ -640,10 +650,13 @@ pub fn paint_icon(ui: &mut Ui, name: &str, rect: Rect, tint: Color32) {
         );
         return;
     }
-    let image = egui::Image::new(icon_source(name))
+    // Paint without allocating a second hover target. `ui.put` used to place
+    // an interactive Image above the nav row, so moving the cursor over an
+    // icon stole hover from the row and made its highlight flicker.
+    egui::Image::new(icon_source(name))
         .tint(tint)
-        .fit_to_exact_size(rect.size());
-    ui.put(rect, image);
+        .fit_to_exact_size(rect.size())
+        .paint_at(ui, rect);
 }
 
 fn icon_source(name: &str) -> egui::ImageSource<'static> {
@@ -698,6 +711,59 @@ mod tests {
         assert_eq!(lerp_color(a, b, 0.5), Color32::from_rgb(100, 50, 150));
         // Out-of-range t is clamped, never wraps the channels.
         assert_eq!(lerp_color(a, b, 2.0), b);
+    }
+
+    #[test]
+    fn nav_icons_do_not_steal_the_row_hover() {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(240.0, 100.0),
+            )),
+            events: vec![egui::Event::PointerMoved(egui::pos2(18.0, 18.0))],
+            ..Default::default()
+        };
+        // Multiple passes catch hover targets left by the preceding frame.
+        let mut hovered_frames = Vec::new();
+        for _ in 0..4 {
+            let mut hovered = false;
+            let _ = ctx.run(input.clone(), |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        hovered = nav_item(ui, "settings", "Settings", false, 1.0).hovered();
+                    });
+            });
+            hovered_frames.push(hovered);
+        }
+        assert!(
+            hovered_frames.iter().skip(1).all(|hovered| *hovered),
+            "the icon must not steal hover from its nav row: {hovered_frames:?}"
+        );
+    }
+
+    #[test]
+    fn field_response_covers_the_outer_frame() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(240.0, 100.0),
+            )),
+            ..Default::default()
+        };
+        let mut field_rect = Rect::NOTHING;
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| {
+                    let mut value = String::new();
+                    field_rect = field(ui, "Game", &mut value, false, false).rect;
+                });
+        });
+        assert_eq!(field_rect.size(), Vec2::new(240.0, 40.0));
     }
 
     #[test]

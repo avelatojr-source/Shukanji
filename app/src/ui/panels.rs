@@ -656,10 +656,9 @@ fn setup_details(ui: &mut egui::Ui, app: &mut App) {
         let p = theme::pal(ui.ctx());
         widgets::field(ui, "Stream title", &mut app.title, false, false);
         ui.add_space(12.0);
-        widgets::field(ui, "Game category", &mut app.game, false, false);
+        let game_field = widgets::field(ui, "Game category", &mut app.game, false, false);
         if app.show_suggestions {
-            ui.add_space(4.0);
-            suggestions_list(ui, app);
+            suggestions_list(ui, app, game_field.rect);
         }
         ui.add_space(12.0);
         let mut mature = app.mature;
@@ -678,32 +677,47 @@ fn setup_details(ui: &mut egui::Ui, app: &mut App) {
     });
 }
 
-fn suggestions_list(ui: &mut egui::Ui, app: &mut App) {
+fn suggestions_list(ui: &mut egui::Ui, app: &mut App, field_rect: Rect) {
     let p = theme::pal(ui.ctx());
     let mut selected: Option<GameCategory> = None;
-    // Match the field above: full available width. Use the remaining visible
-    // height instead of a fixed five-row window; the outer page still scrolls
-    // normally for the controls below, so nothing overlaps.
-    let full_width = ui.available_width();
-    let list_height = (ui.clip_rect().bottom() - ui.cursor().top() - 16.0).max(120.0);
-    egui::Frame::new()
-        .fill(p.sidebar)
-        .stroke(Stroke::new(1.0_f32, p.field_border))
-        .corner_radius(CornerRadius::same(6))
-        .inner_margin(Margin::symmetric(4, 4))
-        .show(ui, |ui| {
-            ui.set_min_width(full_width - 8.0);
-            egui::ScrollArea::vertical()
-                .id_salt("game_suggestions")
-                .max_height(list_height)
-                .auto_shrink([false, true])
+    let full_width = field_rect.width();
+    let anchor = field_rect.left_bottom() + Vec2::new(0.0, 4.0);
+    // Float above the controls below the field instead of pushing them down.
+    // The dropdown may use every visible point down to the Go Live bar.
+    let list_height = (ui.clip_rect().bottom() - anchor.y - 8.0).max(0.0);
+    if list_height < 40.0 {
+        return;
+    }
+    let area = egui::Area::new(egui::Id::new("game_suggestions_overlay"))
+        .order(egui::Order::Foreground)
+        .movable(false)
+        .fixed_pos(anchor)
+        .show(ui.ctx(), |ui| {
+            ui.set_width(full_width);
+            egui::Frame::new()
+                .fill(p.sidebar)
+                .stroke(Stroke::new(1.0_f32, p.field_border))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::symmetric(4, 4))
                 .show(ui, |ui| {
-                    for category in &app.suggestions {
-                        if suggestion_row(ui, &category.full_name, &category.game_mask_id).clicked()
-                        {
-                            selected = Some(category.clone());
-                        }
-                    }
+                    ui.set_min_width(full_width - 8.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("game_suggestions")
+                        .max_height(list_height)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            for category in &app.suggestions {
+                                if suggestion_row(
+                                    ui,
+                                    &category.full_name,
+                                    &category.game_mask_id,
+                                )
+                                .clicked()
+                                {
+                                    selected = Some(category.clone());
+                                }
+                            }
+                        });
                 });
         });
     if let Some(category) = selected {
@@ -711,14 +725,27 @@ fn suggestions_list(ui: &mut egui::Ui, app: &mut App) {
         app.game_mask_id = category.game_mask_id.clone();
         app.show_suggestions = false;
         app.set_game_selection(category.full_name.clone());
+        return;
+    }
+    let outside_pressed = ui.ctx().input(|input| {
+        input.pointer.any_pressed()
+            && input.pointer.latest_pos().is_some_and(|pointer| {
+                !area.response.rect.contains(pointer) && !field_rect.contains(pointer)
+            })
+    });
+    if outside_pressed {
+        app.show_suggestions = false;
     }
 }
 
-/// One suggestion row: name left, category id right, full width.
+/// One suggestion row. The name and category ID have separate clipped lanes,
+/// so even an unusually long ID can never cover the game name.
 fn suggestion_row(ui: &mut egui::Ui, name: &str, mask_id: &str) -> egui::Response {
     let p = theme::pal(ui.ctx());
     let width = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 30.0), Sense::click());
+    let has_id = !mask_id.is_empty();
+    let height = if has_id { 48.0 } else { 30.0 };
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     if response.hovered() {
         ui.painter()
             .rect_filled(rect, CornerRadius::same(4), p.hover);
@@ -731,42 +758,62 @@ fn suggestion_row(ui: &mut egui::Ui, name: &str, mask_id: &str) -> egui::Respons
             StrokeKind::Inside,
         );
     }
-    // Long IDs consume most of a narrow column. Keep them on wide rows only;
-    // the selected ID is always shown below the list. This lets the game name
-    // itself remain readable instead of clipping to a few characters.
-    let show_id = !mask_id.is_empty() && width >= 520.0;
-    let id_font = FontId::monospace(12.0);
-    let id_width = if show_id {
-        ui.painter()
-            .layout_no_wrap(mask_id.to_owned(), id_font.clone(), p.muted)
-            .size()
-            .x
-            + 12.0
-    } else {
-        0.0
-    };
-    let name_right = (rect.right() - 10.0 - id_width).max(rect.left() + 20.0);
-    let name_rect = Rect::from_min_max(
-        egui::pos2(rect.left() + 10.0, rect.top()),
-        egui::pos2(name_right, rect.bottom()),
-    );
-    ui.painter().with_clip_rect(name_rect).text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
+    let (name_lane, id_lane) = suggestion_text_lanes(rect, has_id);
+    ui.painter().with_clip_rect(name_lane).text(
+        egui::pos2(name_lane.left(), name_lane.center().y),
         Align2::LEFT_CENTER,
         name,
         FontId::proportional(14.0),
         p.text,
     );
-    if show_id {
-        ui.painter().text(
-            egui::pos2(rect.right() - 10.0, rect.center().y),
-            Align2::RIGHT_CENTER,
+    if let Some(id_lane) = id_lane {
+        ui.painter().with_clip_rect(id_lane).text(
+            egui::pos2(id_lane.left(), id_lane.center().y),
+            Align2::LEFT_CENTER,
             mask_id,
-            id_font,
+            FontId::monospace(12.0),
             p.muted,
         );
     }
     response
+}
+
+fn suggestion_text_lanes(rect: Rect, has_id: bool) -> (Rect, Option<Rect>) {
+    let inner = Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, rect.top()),
+        egui::pos2((rect.right() - 10.0).max(rect.left() + 10.0), rect.bottom()),
+    );
+    if has_id {
+        let split_y = rect.top() + 24.0;
+        (
+            Rect::from_min_max(inner.min, egui::pos2(inner.right(), split_y)),
+            Some(Rect::from_min_max(
+                egui::pos2(inner.left(), split_y),
+                inner.max,
+            )),
+        )
+    } else {
+        (inner, None)
+    }
+}
+
+#[cfg(test)]
+mod suggestion_layout_tests {
+    use super::*;
+
+    #[test]
+    fn suggestion_name_and_id_lanes_never_overlap() {
+        let row = Rect::from_min_size(egui::pos2(20.0, 40.0), Vec2::new(360.0, 48.0));
+        let (name, id) = suggestion_text_lanes(row, true);
+        let id = id.expect("an ID should get its own lane");
+        assert!(name.bottom() <= id.top());
+        assert_eq!(name.left(), row.left() + 10.0);
+        assert_eq!(id.right(), row.right() - 10.0);
+
+        let (name_only, no_id) = suggestion_text_lanes(row, false);
+        assert!(no_id.is_none());
+        assert_eq!(name_only.height(), row.height());
+    }
 }
 
 // -- Live dashboard
@@ -1502,14 +1549,14 @@ fn page_settings(ui: &mut egui::Ui, app: &mut App) {
                 let mut optimize = app.optimize_mode;
                 if ui
                     .checkbox(&mut optimize, "Optimize Mode")
-                    .on_hover_text("Static Tebby mascot and shorter UI transitions")
+                    .on_hover_text("Static optimized mascot and shorter UI transitions")
                     .changed()
                 {
                     app.set_optimize_mode(ui.ctx(), optimize);
                 }
                 ui.label(
                     RichText::new(
-                        "Uses static Tebby art and shorter transitions to reduce RAM and rendering work. Live chat monitoring stays active.",
+                        "Uses the transparent static mascot and shorter transitions to reduce RAM and rendering work. Live chat monitoring stays active.",
                     )
                     .color(p.muted)
                     .size(12.0),
